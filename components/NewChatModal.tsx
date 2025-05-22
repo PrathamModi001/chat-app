@@ -74,7 +74,6 @@ export default function NewChatModal({ isOpen, onClose, onChatCreated }: NewChat
         },
         body: JSON.stringify({
           userId,
-          chatType: 'Demo',
         }),
       });
       

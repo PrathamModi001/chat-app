@@ -19,7 +19,7 @@ export async function POST(request: NextRequest) {
       );
     }
     
-    const { userId, name, isGroup = false, chatType = 'Demo' } = await request.json();
+    const { userId, name, isGroup = false } = await request.json();
     
     if (!userId) {
       return NextResponse.json(
@@ -118,7 +118,8 @@ export async function POST(request: NextRequest) {
         .map(p => p.users);
       
       return NextResponse.json({
-        chat: {
+        chat: { 
+          //@ts-ignore
           ...existingChat,
           participants: participantsList,
           unread: 0
@@ -130,10 +131,9 @@ export async function POST(request: NextRequest) {
     // Create a new chat
     const { data: chat, error: chatError } = await supabase
       .from('chats')
-      .insert({
+      .insert({ //@ts-ignore
         name: name || `Chat with ${recipient.full_name}`,
         is_group: isGroup,
-        chat_type: chatType,
       } as any)
       .select()
       .single();

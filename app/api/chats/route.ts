@@ -113,6 +113,18 @@ export async function GET(request: NextRequest) {
           `)
           .eq('chat_id', chat.id as any);
         
+        // Get labels for this chat
+        const { data: labelAssignments, error: labelsError } = await supabase
+          .from('chat_label_assignments')
+          .select(`
+            labels (
+              id,
+              name,
+              color
+            )
+          `)
+          .eq('chat_id', chat.id as any);
+        
         // Format the last message - use type assertion
         const typedMessages = messages as SafeAny[];
         const lastMessage = typedMessages[0];
@@ -120,6 +132,12 @@ export async function GET(request: NextRequest) {
         const participantsList = typedParticipants
           .filter(p => p && p.users)
           .map(p => p.users);
+        
+        // Format labels
+        const typedLabelAssignments = labelAssignments as SafeAny[] || [];
+        const labels = typedLabelAssignments
+          .filter(la => la && la.labels)
+          .map(la => la.labels);
         
         return {
           ...chat,
@@ -133,7 +151,8 @@ export async function GET(request: NextRequest) {
             is_forwarded: lastMessage.is_forwarded,
           } : null,
           unread: unreadCount || 0,
-          participants: participantsList
+          participants: participantsList,
+          labels: labels
         };
       })
     );

@@ -5,17 +5,22 @@ let supabaseClient: ReturnType<typeof createClientComponentClient<Database>> | n
 
 export function createClient() {
   if (!supabaseClient) {
-    // Default to using auth-helpers-nextjs with default configuration
-    // which will use the environment variables automatically
-    supabaseClient = createClientComponentClient<Database>({
-      options: {
-        realtime: {
-          params: {
-            eventsPerSecond: 10
+    try {
+      // Default to using auth-helpers-nextjs with default configuration
+      supabaseClient = createClientComponentClient<Database>({
+        options: {
+          realtime: {
+            params: {
+              eventsPerSecond: 10
+            }
           }
         }
-      }
-    });
+      });
+    } catch (error) {
+      console.error('Error creating Supabase client:', error);
+      // Create a fallback client that won't throw additional errors
+      supabaseClient = createClientComponentClient<Database>();
+    }
   }
   return supabaseClient;
 } 

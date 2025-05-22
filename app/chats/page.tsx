@@ -8,10 +8,11 @@ import {
   FaUser, FaSearch, FaEllipsisV, FaPaperPlane, FaSmile, 
   FaPaperclip, FaMicrophone, FaHome, FaComments, FaChartLine,
   FaFileAlt, FaCog, FaUsers, FaFilter, FaSave, FaSync, FaPhone,
-  FaQuestion, FaCheck
+  FaQuestion, FaCheck, FaTags
 } from 'react-icons/fa';
 import MessageService from '@/lib/websocket';
 import NewChatModal from '@/components/NewChatModal';
+import ManageLabelsModal from '@/components/ManageLabelsModal';
 
 interface User {
   id: string;
@@ -19,6 +20,12 @@ interface User {
   phone?: string;
   email?: string;
   profile_image_url?: string;
+}
+
+interface Label {
+  id: string;
+  name: string;
+  color?: string;
 }
 
 interface Message {
@@ -55,8 +62,8 @@ interface Chat {
   updated_at: string;
   unread: number;
   is_group: boolean;
-  chat_type: 'Demo' | 'Internal' | 'Signup' | 'Content' | 'Dont Send';
   participants: User[];
+  labels?: Label[];
 }
 
 export default function ChatsPage() {
@@ -66,14 +73,43 @@ export default function ChatsPage() {
   const [message, setMessage] = useState('');
   const [filtered, setFiltered] = useState(true);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [messageSearchQuery, setMessageSearchQuery] = useState<string>('');
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [chats, setChats] = useState<Chat[]>([]);
+  const [filteredChats, setFilteredChats] = useState<Chat[]>([]);
   const [chatMessages, setChatMessages] = useState<Message[]>([]);
+  const [filteredMessages, setFilteredMessages] = useState<Message[]>([]);
   const [loadingChats, setLoadingChats] = useState(true);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [newChatModalOpen, setNewChatModalOpen] = useState(false);
+  const [manageLabelsModalOpen, setManageLabelsModalOpen] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messageService = MessageService.getInstance();
+
+  // Function to fetch messages for the selected chat
+  const fetchMessages = async () => {
+    if (!selectedChat) return;
+    
+    try {
+      setLoadingMessages(true);
+      const response = await fetch(`/api/messages?chatId=${selectedChat}`);
+      
+      if (!response.ok) {
+        throw new Error('Failed to fetch messages');
+      }
+      
+      const data = await response.json();
+      setChatMessages(data.messages || []);
+      setFilteredMessages(data.messages || []);
+    } catch (error) {
+      console.error('Error fetching messages:', error);
+      setError('Failed to load messages. Please try again.');
+    } finally {
+      setLoadingMessages(false);
+    }
+  };
 
   // Function to refresh chats
   const refreshChats = async () => {
@@ -87,6 +123,22 @@ export default function ChatsPage() {
       }
       const data = await response.json();
       setChats(data.chats || []);
+      
+      // If there's no search query, also update filteredChats
+      if (!searchQuery.trim()) {
+        setFilteredChats(data.chats || []);
+      } else {
+        // Re-apply filter with new data
+        const query = searchQuery.toLowerCase();
+        const filtered = (data.chats || []).filter((chat: Chat) => {
+          if (chat.name?.toLowerCase().includes(query)) return true;
+          if (chat.participants?.some((p: User) => p.full_name.toLowerCase().includes(query))) return true;
+          if (chat.participants?.some((p: User) => p.phone?.includes(query))) return true;
+          if (chat.lastMessage?.content.toLowerCase().includes(query)) return true;
+          return false;
+        });
+        setFilteredChats(filtered);
+      }
     } catch (error) {
       console.error('Error fetching chats:', error);
       setError('Failed to load chats. Please try again.');
@@ -102,29 +154,81 @@ export default function ChatsPage() {
     }
   }, [user]);
 
-  // Fetch messages when a chat is selected
+  // Filter chats based on search query
   useEffect(() => {
-    async function fetchMessages() {
-      if (!selectedChat) return;
+    if (!chats.length) {
+      setFilteredChats([]);
+      return;
+    }
+
+    if (!searchQuery.trim()) {
+      setFilteredChats(chats);
+      return;
+    }
+
+    const query = searchQuery.toLowerCase();
+    const filtered = chats.filter(chat => {
+      // Search in chat name
+      if (chat.name?.toLowerCase().includes(query)) return true;
       
+      // Search in participant names
+      if (chat.participants?.some(p => p.full_name.toLowerCase().includes(query))) return true;
+      
+      // Search in participant phone numbers
+      if (chat.participants?.some(p => p.phone?.includes(query))) return true;
+      
+      // Search in last message content
+      if (chat.lastMessage?.content.toLowerCase().includes(query)) return true;
+      
+      return false;
+    });
+    
+    setFilteredChats(filtered);
+  }, [chats, searchQuery]);
+
+  // Filter messages based on search query
+  useEffect(() => {
+    if (!selectedChat) return;
+    
+    // If not in search mode or search query is empty, just show all messages
+    if (!isSearchOpen || !messageSearchQuery.trim()) {
+      setFilteredMessages(chatMessages);
+      return;
+    }
+    
+    // If search query exists, fetch messages with search from API
+    const fetchSearchResults = async () => {
       try {
         setLoadingMessages(true);
-        const response = await fetch(`/api/messages?chatId=${selectedChat}`);
+        const response = await fetch(`/api/messages?chatId=${selectedChat}&search=${encodeURIComponent(messageSearchQuery.trim())}`);
         
         if (!response.ok) {
-          throw new Error('Failed to fetch messages');
+          throw new Error('Failed to search messages');
         }
         
         const data = await response.json();
-        setChatMessages(data.messages || []);
+        setFilteredMessages(data.messages || []);
       } catch (error) {
-        console.error('Error fetching messages:', error);
-        setError('Failed to load messages. Please try again.');
+        console.error('Error searching messages:', error);
+        setError('Failed to search messages. Please try again.');
       } finally {
         setLoadingMessages(false);
       }
-    }
+    };
+    
+    // Debounce the search to avoid too many API calls
+    const timerId = setTimeout(() => {
+      fetchSearchResults();
+    }, 500);
+    
+    return () => clearTimeout(timerId);
+  }, [selectedChat, messageSearchQuery]);
 
+  // Fetch messages when a chat is selected
+  useEffect(() => {
+    if (!selectedChat) return;
+    
+    // Call our fetchMessages function
     fetchMessages();
     
     // Set up message monitoring for the selected chat
@@ -133,18 +237,37 @@ export default function ChatsPage() {
       messageService.subscribeToChat(selectedChat, (newMessages) => {
         console.log("Received new messages:", newMessages);
         
-        // Refresh both messages and chats
-        Promise.all([
-          fetch(`/api/messages?chatId=${selectedChat}`).then(res => res.json()),
-          fetch('/api/chats').then(res => res.json())
-        ])
-        .then(([messagesData, chatsData]) => {
-          setChatMessages(messagesData.messages || []);
-          setChats(chatsData.chats || []);
-        })
-        .catch(err => {
-          console.error('Error updating after new messages:', err);
-        });
+        // If we're searching, we need to add the new message and then reapply the search filter
+        if (isSearchOpen && messageSearchQuery.trim()) {
+          // Check if the new message matches our search criteria
+          Promise.all([
+            fetch(`/api/messages?chatId=${selectedChat}&search=${encodeURIComponent(messageSearchQuery.trim())}`).then(res => res.json()),
+            fetch('/api/chats').then(res => res.json())
+          ])
+          .then(([messagesData, chatsData]) => {
+            setFilteredMessages(messagesData.messages || []);
+            setChats(chatsData.chats || []);
+            setFilteredChats(filtered ? chatsData.chats || [] : []);
+          })
+          .catch(err => {
+            console.error('Error updating after new messages during search:', err);
+          });
+        } else {
+          // If not searching, refresh both messages and chats
+          Promise.all([
+            fetch(`/api/messages?chatId=${selectedChat}`).then(res => res.json()),
+            fetch('/api/chats').then(res => res.json())
+          ])
+          .then(([messagesData, chatsData]) => {
+            setChatMessages(messagesData.messages || []);
+            setFilteredMessages(messagesData.messages || []);
+            setChats(chatsData.chats || []);
+            setFilteredChats(filtered ? chatsData.chats || [] : []);
+          })
+          .catch(err => {
+            console.error('Error updating after new messages:', err);
+          });
+        }
       });
     }
 
@@ -201,6 +324,7 @@ export default function ChatsPage() {
       
       // Add the new message to the chat
       setChatMessages(prev => [...prev, data.message]);
+      setFilteredMessages(prev => [...prev, data.message]);
       
       // Clear the input field
       setMessage('');
@@ -229,17 +353,6 @@ export default function ChatsPage() {
     );
   }
 
-  // Function to get badge color based on chat type
-  const getBadgeColor = (type?: string) => {
-    switch (type) {
-      case 'Demo': return 'bg-gray-100 text-gray-700';
-      case 'Internal': return 'bg-green-50 text-green-600';
-      case 'Content': return 'bg-blue-50 text-blue-600';
-      case 'Signup': return 'bg-green-50 text-green-600';
-      default: return 'bg-gray-100 text-gray-700';
-    }
-  };
-
   // Function to format date for display
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);
@@ -264,7 +377,7 @@ export default function ChatsPage() {
   const groupMessagesByDate = () => {
     const groups: { [date: string]: Message[] } = {};
     
-    chatMessages.forEach(msg => {
+    filteredMessages.forEach(msg => {
       if (!groups[msg.date]) {
         groups[msg.date] = [];
       }
@@ -306,7 +419,7 @@ export default function ChatsPage() {
           />
         </div>
         <div className="flex flex-col space-y-6 items-center flex-1">
-          <button className="p-3 text-gray-400 hover:text-gray-600">
+          <button className="p-3 text-black hover:text-gray-800">
             <FaHome size={20} />
           </button>
           <button className="p-3 text-green-600 hover:text-green-700 relative">
@@ -315,17 +428,17 @@ export default function ChatsPage() {
               {chats.reduce((acc, chat) => acc + (chat.unread || 0), 0)}
             </span>
           </button>
-          <button className="p-3 text-gray-400 hover:text-gray-600">
+          <button className="p-3 text-black hover:text-gray-800">
             <FaChartLine size={20} />
           </button>
-          <button className="p-3 text-gray-400 hover:text-gray-600">
+          <button className="p-3 text-black hover:text-gray-800">
             <FaFileAlt size={20} />
           </button>
-          <button className="p-3 text-gray-400 hover:text-gray-600">
+          <button className="p-3 text-black hover:text-gray-800">
             <FaUsers size={20} />
           </button>
         </div>
-        <button className="p-3 text-gray-400 hover:text-gray-600 mt-auto" onClick={logout}>
+        <button className="p-3 text-black hover:text-gray-800 mt-auto" onClick={logout}>
           <FaCog size={20} />
         </button>
       </div>
@@ -338,7 +451,7 @@ export default function ChatsPage() {
             <h1 className="font-medium text-sm text-gray-600">CHATS</h1>
           </div>
           <div className="flex space-x-3">
-            <button className="text-gray-500 hover:text-gray-700" onClick={refreshChats}>
+            <button className="text-black hover:text-gray-800" onClick={refreshChats}>
               <FaSync />
             </button>
             <button 
@@ -347,10 +460,10 @@ export default function ChatsPage() {
             >
               +
             </button>
-            <button className="text-gray-500 hover:text-gray-700">
+            <button className="text-black hover:text-gray-800">
               <FaQuestion />
             </button>
-            <div className="flex items-center text-xs text-gray-600">
+            <div className="flex items-center text-xs text-black">
               <span className="text-yellow-500 mr-1">●</span>
               5 / 5 phones
             </div>
@@ -367,18 +480,44 @@ export default function ChatsPage() {
             <FaSave className="mr-1" />
             Save
           </button>
-          <button className="px-3 py-1 rounded-md text-xs border border-gray-300 text-gray-600 flex items-center">
+          <button 
+            className="px-3 py-1 rounded-md text-xs border border-gray-300 text-gray-600 flex items-center"
+            onClick={() => setSearchOpen(!searchOpen)}
+          >
             <FaSearch className="mr-1" />
             Search
           </button>
           <button 
-            className="px-3 py-1 rounded-md text-xs bg-green-50 text-green-600 border border-green-100 flex items-center"
+            className={`px-3 py-1 rounded-md text-xs ${filtered ? 'bg-green-50 text-green-600 border border-green-100' : 'border border-gray-300 text-gray-600'} flex items-center`}
             onClick={() => setFiltered(!filtered)}
           >
             <span>Filtered</span>
-            <FaFilter className="ml-1 text-green-500" />
+            <FaFilter className={`ml-1 ${filtered ? 'text-green-500' : 'text-gray-500'}`} />
           </button>
         </div>
+
+        {/* Search input for chats */}
+        {searchOpen && (
+          <div className="p-2 border-b bg-white">
+            <div className="relative">
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search chats..."
+                className="w-full px-3 py-2 pr-10 border rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-green-500"
+              />
+              {searchQuery && (
+                <button 
+                  className="absolute right-2 top-2 text-black hover:text-gray-800"
+                  onClick={() => setSearchQuery('')}
+                >
+                  ×
+                </button>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Chat list */}
         <div className="flex-1 overflow-y-auto bg-white relative">
@@ -394,30 +533,32 @@ export default function ChatsPage() {
           
           {loadingChats ? (
             <div className="flex justify-center items-center h-32">
-              <div className="animate-pulse text-gray-400">Loading chats...</div>
+              <div className="animate-pulse text-black">Loading chats...</div>
             </div>
-          ) : chats.length === 0 ? (
+          ) : filteredChats.length === 0 ? (
             <div className="flex justify-center items-center h-32">
-              <div className="text-gray-400">No chats found</div>
+              <div className="text-black">
+                {searchQuery ? 'No matching chats found' : 'No chats found'}
+              </div>
             </div>
           ) : (
-            chats.map((chat) => (
-              <div 
-                key={chat.id}
-                className={`flex p-3 border-b cursor-pointer hover:bg-gray-50 ${selectedChat === chat.id ? 'bg-gray-100' : ''}`}
-                onClick={() => setSelectedChat(chat.id)}
-              >
+            filteredChats.map((chat) => (
+            <div 
+              key={chat.id}
+              className={`flex p-3 border-b cursor-pointer hover:bg-gray-50 ${selectedChat === chat.id ? 'bg-gray-100' : ''}`}
+              onClick={() => setSelectedChat(chat.id)}
+            >
                 <div className="w-10 h-10 rounded-full bg-gray-200 flex-shrink-0 flex items-center justify-center text-gray-600 relative mr-3">
                   {(chat.name || 'Unknown').charAt(0).toUpperCase()}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex justify-between items-center">
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex justify-between items-center">
                     <h3 className="font-medium text-gray-900 text-sm truncate">{chat.name || chat.participants?.[0]?.full_name || 'Unknown Chat'}</h3>
-                    <span className="text-xs text-gray-500 whitespace-nowrap">
+                    <span className="text-xs text-black whitespace-nowrap">
                       {chat.lastMessage ? formatDate(chat.lastMessage.created_at) : formatDate(chat.created_at)}
                     </span>
-                  </div>
-                  <p className="text-xs text-gray-500 truncate">
+                </div>
+                  <p className="text-xs text-black truncate">
                     {chat.lastMessage ? (
                       <>
                         {chat.lastMessage.sender_id !== user.id && (
@@ -426,26 +567,38 @@ export default function ChatsPage() {
                         {chat.lastMessage.content}
                       </>
                     ) : (
-                      <span className="italic text-gray-400">No messages yet</span>
+                      <span className="italic text-black">No messages yet</span>
                     )}
-                  </p>
-                  <div className="flex mt-1 items-center">
-                    <span className="text-xs text-gray-400 mr-2 whitespace-nowrap">
+                </p>
+                <div className="flex mt-1 items-center">
+                    <span className="text-xs text-black mr-2 whitespace-nowrap">
                       {chat.participants?.filter(p => p.id !== user.id)[0]?.phone || ''}
                     </span>
-                    {chat.chat_type && (
-                      <span className={`text-xs px-2 py-0.5 rounded ${getBadgeColor(chat.chat_type)}`}>
-                        {chat.chat_type.toLowerCase()}
-                      </span>
+                    {/* Display labels if available */}
+                    {chat.labels && chat.labels.length > 0 && (
+                      <div className="flex flex-wrap gap-1 mr-auto">
+                        {chat.labels.map(label => (
+                          <span 
+                            key={label.id} 
+                            className="text-xs px-2 py-0.5 rounded" 
+                            style={{ 
+                              backgroundColor: label.color ? `${label.color}20` : '#e5e7eb',
+                              color: label.color || '#4b5563'
+                            }}
+                          >
+                            {label.name}
+                          </span>
+                        ))}
+                      </div>
                     )}
                     {chat.unread > 0 && (
-                      <span className="ml-auto inline-flex items-center justify-center px-2 py-0.5 text-xs font-medium bg-green-100 text-green-700 rounded-full">
-                        +{chat.unread}
-                      </span>
-                    )}
-                  </div>
+                    <span className="ml-auto inline-flex items-center justify-center px-2 py-0.5 text-xs font-medium bg-green-100 text-green-700 rounded-full">
+                      +{chat.unread}
+                    </span>
+                  )}
                 </div>
               </div>
+            </div>
             ))
           )}
         </div>
@@ -463,7 +616,7 @@ export default function ChatsPage() {
                 ) : (
                   <div className="w-8 h-8 rounded-full bg-gray-200 flex items-center justify-center text-gray-600 mr-3">
                     {(chats.find(c => c.id === selectedChat)?.name || 'U').charAt(0).toUpperCase()}
-                  </div>
+                </div>
                 )}
                 <div>
                   {loadingMessages ? (
@@ -478,10 +631,8 @@ export default function ChatsPage() {
                   {loadingMessages ? (
                     <div className="animate-pulse h-3 w-32 bg-gray-200 rounded"></div>
                   ) : (
-                    <p className="text-xs text-gray-500 flex items-center">
+                    <p className="text-xs text-black flex items-center">
                       {chats.find(c => c.id === selectedChat)?.participants?.filter(p => p.id !== user.id)[0]?.phone || ''}
-                      <span className="mx-1">•</span>
-                      {chats.find(c => c.id === selectedChat)?.chat_type?.toLowerCase() || 'unknown'}
                     </p>
                   )}
                 </div>
@@ -500,14 +651,62 @@ export default function ChatsPage() {
                     </div>
                   )}
                 </div>
-                <button className="p-2 rounded-full hover:bg-gray-100 text-gray-600">
+                <button className="p-2 rounded-full hover:bg-gray-100 text-black">
                   <FaPhone size={18} />
                 </button>
-                <button className="p-2 rounded-full hover:bg-gray-100 text-gray-600">
+                <button 
+                  className="p-2 rounded-full hover:bg-gray-100 text-black"
+                  onClick={() => {
+                    // Toggle search visibility
+                    if (isSearchOpen) {
+                      // Close search
+                      setIsSearchOpen(false);
+                      setMessageSearchQuery('');
+                      // Reset to original messages without search
+                      fetchMessages();
+                    } else {
+                      // Open search with empty string to start
+                      setIsSearchOpen(true);
+                      setMessageSearchQuery('');
+                    }
+                  }}
+                >
                   <FaSearch size={18} />
                 </button>
-                <button className="p-2 rounded-full hover:bg-gray-100 text-gray-600">
+                <button 
+                  className="p-2 rounded-full hover:bg-gray-100 text-black"
+                  onClick={() => setManageLabelsModalOpen(true)}
+                >
+                  <FaTags size={18} />
+                </button>
+                <button className="p-2 rounded-full hover:bg-gray-100 text-black">
                   <FaEllipsisV size={18} />
+                </button>
+              </div>
+            </div>
+
+            {/* Message search */}
+            <div className={`bg-white p-2 border-b transition-all duration-300 ease-in-out overflow-hidden ${isSearchOpen ? 'max-h-16' : 'max-h-0'}`}>
+              <div className="relative">
+                <input
+                  type="text"
+                  value={messageSearchQuery}
+                  onChange={(e) => setMessageSearchQuery(e.target.value)}
+                  placeholder="Search in conversation..."
+                  className="w-full px-3 py-2 pr-10 border rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-green-500"
+                  autoFocus={isSearchOpen}
+                />
+                <button 
+                  className="absolute right-2 top-2 text-black hover:text-gray-800"
+                  onClick={() => {
+                    setMessageSearchQuery('');
+                    if (messageSearchQuery.trim()) {
+                      // If there was a search query, refetch all messages
+                      fetchMessages();
+                    }
+                  }}
+                >
+                  ×
                 </button>
               </div>
             </div>
@@ -519,40 +718,62 @@ export default function ChatsPage() {
                 <button
                   onClick={() => {
                     if (selectedChat) {
-                      setLoadingMessages(true);
-                      fetch(`/api/messages?chatId=${selectedChat}`)
-                        .then(res => res.json())
-                        .then(data => {
-                          setChatMessages(data.messages || []);
-                          setLoadingMessages(false);
-                        })
-                        .catch(err => {
-                          console.error('Error refreshing messages:', err);
-                          setLoadingMessages(false);
-                        });
+                      // If we're searching, refresh the search results
+                      if (isSearchOpen && messageSearchQuery.trim()) {
+                        const searchUrl = `/api/messages?chatId=${selectedChat}&search=${encodeURIComponent(messageSearchQuery.trim())}`;
+                        setLoadingMessages(true);
+                        fetch(searchUrl)
+                          .then(res => res.json())
+                          .then(data => {
+                            setFilteredMessages(data.messages || []);
+                            setLoadingMessages(false);
+                          })
+                          .catch(err => {
+                            console.error('Error refreshing search results:', err);
+                            setLoadingMessages(false);
+                          });
+                      } else {
+                        // Otherwise refresh all messages
+                        setLoadingMessages(true);
+                        fetch(`/api/messages?chatId=${selectedChat}`)
+                          .then(res => res.json())
+                          .then(data => {
+                            setChatMessages(data.messages || []);
+                            setFilteredMessages(data.messages || []);
+                            setLoadingMessages(false);
+                          })
+                          .catch(err => {
+                            console.error('Error refreshing messages:', err);
+                            setLoadingMessages(false);
+                          });
+                      }
                     }
                   }}
-                  className="p-2 rounded-full bg-white text-gray-500 hover:text-gray-700 shadow-md"
-                  title="Refresh messages"
+                  className="p-2 rounded-full bg-white text-black hover:text-gray-800 shadow-md"
+                  title={isSearchOpen && messageSearchQuery.trim() ? "Refresh search results" : "Refresh messages"}
                 >
                   <FaSync className={loadingMessages ? "animate-spin" : ""} />
                 </button>
               </div>
-              
+
               {loadingMessages ? (
                 <div className="flex justify-center items-center h-full">
-                  <div className="animate-pulse text-gray-400">Loading messages...</div>
+                  <div className="animate-pulse text-black">Loading messages...</div>
                 </div>
               ) : chatMessages.length === 0 ? (
                 <div className="flex justify-center items-center h-full">
-                  <div className="text-gray-400">No messages yet</div>
+                  <div className="text-black">No messages yet</div>
+                  </div>
+              ) : filteredMessages.length === 0 && isSearchOpen ? (
+                <div className="flex justify-center items-center h-full">
+                  <div className="text-black">No messages match your search</div>
                 </div>
               ) : (
-                Object.entries(messageGroups).map(([date, messages]) => (
+                Object.entries(groupMessagesByDate()).map(([date, messages]) => (
                   <div key={date}>
-                    {/* Date marker */}
+              {/* Date marker */}
                     <div className="flex justify-center mb-4">
-                      <span className="px-3 py-1 bg-gray-200 rounded-full text-xs text-gray-600">
+                <span className="px-3 py-1 bg-gray-200 rounded-full text-xs text-gray-600">
                         {date}
                       </span>
                     </div>
@@ -563,34 +784,34 @@ export default function ChatsPage() {
                         {!msg.isSent && (
                           <div className="flex-shrink-0 w-8 h-8 rounded-full bg-gray-300 flex items-center justify-center text-gray-600 mr-2">
                             {msg.sender.charAt(0).toUpperCase()}
-                          </div>
+                  </div>
                         )}
                         <div className={`max-w-md ${msg.isSent ? '' : 'ml-2'}`}>
                           {/* Show sender info for incoming messages or for the first message in a sequence */}
                           {(!msg.isSent || (index > 0 && messages[index - 1].isSent !== msg.isSent)) && (
-                            <div className={`text-xs text-gray-500 mb-1 ${msg.isSent ? 'flex justify-end' : ''}`}>
-                              {msg.sender} {msg.phoneNumber && <span className="text-gray-400 ml-1">{msg.phoneNumber}</span>}
-                            </div>
+                            <div className={`text-xs text-black mb-1 ${msg.isSent ? 'flex justify-end' : ''}`}>
+                              {msg.sender} {msg.phoneNumber && <span className="text-black ml-1">{msg.phoneNumber}</span>}
+                </div>
                           )}
                           <div className={`${msg.isSent ? 'bg-green-50' : 'bg-white'} p-3 rounded-lg`}>
                             <p className="text-gray-800">{msg.text}</p>
                             <div className={`${msg.isSent ? 'flex justify-between' : ''} items-center mt-1`}>
                               {msg.email && msg.isSent && (
-                                <span className="text-xs text-gray-400">{msg.email}</span>
+                                <span className="text-xs text-black">{msg.email}</span>
                               )}
                               <div className={`flex items-center ${!msg.isSent ? 'justify-end' : ''}`}>
-                                <span className="text-xs text-gray-500 mr-1">{msg.time}</span>
+                                <span className="text-xs text-black mr-1">{msg.time}</span>
                                 {msg.isSent && (
-                                  <span className="text-green-500">
-                                    <FaCheck className="inline" />
+                        <span className="text-green-500">
+                          <FaCheck className="inline" />
                                     {msg.isRead && <FaCheck className="inline -ml-1" />}
-                                  </span>
+                        </span>
                                 )}
-                              </div>
-                            </div>
-                          </div>
-                        </div>
                       </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
                     ))}
                   </div>
                 ))
@@ -611,21 +832,21 @@ export default function ChatsPage() {
 
             {/* Message input */}
             <div className="px-3 py-2 border-t bg-white flex items-center">
-              <button className="p-2 text-gray-600 hover:text-gray-900">
+              <button className="p-2 text-black hover:text-gray-800">
                 <FaSmile className="text-xl" />
               </button>
-              <button className="p-2 text-gray-600 hover:text-gray-900">
+              <button className="p-2 text-black hover:text-gray-800">
                 <FaPaperclip className="text-xl" />
               </button>
               <input
                 type="text"
-                className="flex-1 border-0 bg-gray-100 rounded-full px-4 py-2 mx-2 focus:outline-none focus:ring-1 focus:ring-green-500"
+                className="flex-1 border-0 bg-gray-100 rounded-full px-4 py-2 mx-2 focus:outline-none focus:ring-1 focus:ring-green-500 text-black"
                 placeholder="Message..."
                 value={message}
                 onChange={(e) => setMessage(e.target.value)}
                 onKeyPress={handleKeyPress}
               />
-              <button className="p-2 text-gray-600 hover:text-gray-900">
+              <button className="p-2 text-black hover:text-gray-800">
                 <FaMicrophone className="text-xl" />
               </button>
               <button 
@@ -646,6 +867,17 @@ export default function ChatsPage() {
           </div>
         )}
       </div>
+
+      {/* Manage Labels Modal */}
+      {selectedChat && (
+        <ManageLabelsModal
+          isOpen={manageLabelsModalOpen}
+          onClose={() => setManageLabelsModalOpen(false)}
+          chatId={selectedChat}
+          chatName={chats.find(c => c.id === selectedChat)?.name || 'Unknown Chat'}
+          onLabelApplied={() => refreshChats()}
+        />
+      )}
     </div>
   );
 } 

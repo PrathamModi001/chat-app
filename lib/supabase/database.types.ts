@@ -47,7 +47,6 @@ export interface Database {
           name?: string
           description?: string
           is_group: boolean
-          chat_type: 'Demo' | 'Internal' | 'Signup' | 'Content' | 'Dont Send'
           created_at: string
           updated_at: string
         }
@@ -56,7 +55,6 @@ export interface Database {
           name?: string
           description?: string
           is_group?: boolean
-          chat_type?: 'Demo' | 'Internal' | 'Signup' | 'Content' | 'Dont Send'
           created_at?: string
           updated_at?: string
         }
@@ -65,7 +63,6 @@ export interface Database {
           name?: string
           description?: string
           is_group?: boolean
-          chat_type?: 'Demo' | 'Internal' | 'Signup' | 'Content' | 'Dont Send'
           created_at?: string
           updated_at?: string
         }

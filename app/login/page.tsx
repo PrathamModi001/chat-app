@@ -25,7 +25,7 @@ export default function Login() {
   return (
     <div className="flex min-h-screen bg-gray-50">
       <div className="w-full max-w-md mx-auto flex flex-col justify-center p-6">
-        <Link href="/" className="flex items-center text-gray-600 mb-8 hover:text-gray-800">
+        <Link href="/" className="flex items-center text-black mb-8 hover:text-gray-800">
           <FaArrowLeft className="mr-2" />
           <span>Back to home</span>
         </Link>
@@ -38,7 +38,7 @@ export default function Login() {
         </div>
         
         <h2 className="text-2xl font-bold text-gray-800 mb-2">Welcome back</h2>
-        <p className="text-gray-600 mb-8">Log in to your account to continue</p>
+        <p className="text-black mb-8">Log in to your account to continue</p>
         
         <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
           {error && (
@@ -49,7 +49,7 @@ export default function Login() {
           
           <form onSubmit={handleSubmit}>
             <div className="mb-4">
-              <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-1">
+              <label htmlFor="email" className="block text-sm font-medium text-black mb-1">
                 Email
               </label>
               <input
@@ -57,7 +57,7 @@ export default function Login() {
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent text-black"
                 placeholder="Enter your email"
                 required
               />
@@ -65,7 +65,7 @@ export default function Login() {
             
             <div className="mb-6">
               <div className="flex justify-between mb-1">
-                <label htmlFor="password" className="block text-sm font-medium text-gray-700">
+                <label htmlFor="password" className="block text-sm font-medium text-black">
                   Password
                 </label>
                 <Link href="#" className="text-sm text-green-600 hover:text-green-800">
@@ -77,7 +77,7 @@ export default function Login() {
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent text-black"
                 placeholder="Enter your password"
                 required
               />
@@ -93,7 +93,7 @@ export default function Login() {
           </form>
         </div>
         
-        <p className="mt-6 text-center text-gray-600">
+        <p className="mt-6 text-center text-black">
           Don't have an account?{' '}
           <Link href="/signup" className="text-green-600 font-medium hover:text-green-800">
             Sign up

@@ -21,6 +21,7 @@ export async function GET(request: NextRequest) {
     
     // Get chatId from query parameters
     const chatId = request.nextUrl.searchParams.get('chatId');
+    const searchQuery = request.nextUrl.searchParams.get('search');
     
     if (!chatId) {
       return NextResponse.json(
@@ -53,7 +54,7 @@ export async function GET(request: NextRequest) {
     }
     
     // Fetch messages for this chat
-    const { data: messages, error: messagesError } = await supabase
+    let messagesQuery = supabase
       .from('messages')
       .select(`
         id,
@@ -72,8 +73,15 @@ export async function GET(request: NextRequest) {
           phone
         )
       `)
-      .eq('chat_id', chatId as any)
-      .order('created_at', { ascending: true });
+      .eq('chat_id', chatId as any);
+      
+    // Apply search filter if provided
+    if (searchQuery) {
+      messagesQuery = messagesQuery.ilike('content', `%${searchQuery}%`);
+    }
+    
+    // Complete the query with ordering
+    const { data: messages, error: messagesError } = await messagesQuery.order('created_at', { ascending: true });
     
     if (messagesError || !messages) {
       console.error('Error fetching messages:', messagesError);

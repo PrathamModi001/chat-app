@@ -1,133 +1,65 @@
-import { createClient } from '@/lib/supabase/client';
-
-type MessageCallback = (messages: any[]) => void;
-
-/**
- * A message polling service that simulates real-time behavior
- * using regular polling instead of WebSockets
- */
+// MessageService class for handling real-time message updates using polling
 class MessageService {
   private static instance: MessageService;
-  private supabase = createClient();
-  private pollingIntervals: Map<string, NodeJS.Timeout> = new Map();
-  private callbacks: Map<string, MessageCallback> = new Map();
-  private lastMessageTimestamps: Map<string, string> = new Map();
-  
+  private pollingIntervals: { [chatId: string]: NodeJS.Timeout } = {};
+  private callbacks: { [chatId: string]: ((messages: any[]) => void)[] } = {};
+  private POLLING_INTERVAL = 3000; // 3 seconds
+
   private constructor() {}
-  
+
   public static getInstance(): MessageService {
     if (!MessageService.instance) {
       MessageService.instance = new MessageService();
     }
     return MessageService.instance;
   }
-  
-  /**
-   * Start polling for new messages in a specific chat
-   * @param chatId The ID of the chat to monitor
-   * @param callback Function to call when new messages are received
-   */
-  public subscribeToChat(chatId: string, callback: MessageCallback): void {
-    // Stop any existing polling for this chat
-    this.unsubscribeFromChat(chatId);
-    
-    // Store the callback
-    this.callbacks.set(chatId, callback);
-    
-    // Get the current timestamp
-    const now = new Date().toISOString();
-    this.lastMessageTimestamps.set(chatId, now);
-    
-    console.log(`Starting message polling for chat ${chatId}`);
-    
-    // Start polling
-    const interval = setInterval(() => {
-      this.checkForNewMessages(chatId);
-    }, 3000); // Poll every 3 seconds
-    
-    this.pollingIntervals.set(chatId, interval);
-  }
-  
-  /**
-   * Check for new messages in a chat
-   * @param chatId The chat ID to check
-   */
-  private async checkForNewMessages(chatId: string): Promise<void> {
-    try {
-      const lastTimestamp = this.lastMessageTimestamps.get(chatId);
-      
-      if (!lastTimestamp) {
-        return;
-      }
-      
-      // Fetch messages newer than the last one we've seen
-      const { data: messages, error } = await this.supabase
-        .from('messages')
-        .select(`
-          id,
-          content,
-          message_type,
-          is_forwarded,
-          created_at,
-          sender_id,
-          chat_id
-        `)
-        .eq('chat_id', chatId)
-        .gt('created_at', lastTimestamp)
-        .order('created_at', { ascending: true });
-      
-      if (error) {
-        console.error(`Error polling for messages in chat ${chatId}:`, error);
-        return;
-      }
-      
-      // If we have new messages, update the last timestamp and call the callback
-      if (messages && messages.length > 0) {
-        console.log(`Found ${messages.length} new messages in chat ${chatId}`);
-        
-        // Update the last message timestamp
-        const latestMessage = messages[messages.length - 1];
-        this.lastMessageTimestamps.set(chatId, latestMessage.created_at);
-        
-        // Call the callback with the new messages
-        const callback = this.callbacks.get(chatId);
-        if (callback) {
-          callback(messages);
+
+  public subscribeToChat(chatId: string, callback: (messages: any[]) => void) {
+    // Add callback to the list of callbacks for this chat
+    if (!this.callbacks[chatId]) {
+      this.callbacks[chatId] = [];
+    }
+    this.callbacks[chatId].push(callback);
+
+    // If no polling interval exists for this chat, create one
+    if (!this.pollingIntervals[chatId]) {
+      this.pollingIntervals[chatId] = setInterval(async () => {
+        try {
+          const response = await fetch(`/api/messages?chatId=${chatId}`);
+          if (!response.ok) {
+            throw new Error('Failed to fetch messages');
+          }
+          const data = await response.json();
+          
+          // Notify all callbacks for this chat
+          this.callbacks[chatId].forEach(cb => cb(data.messages || []));
+        } catch (error) {
+          console.error('Error polling messages:', error);
         }
-      }
-    } catch (error) {
-      console.error(`Error checking for new messages in chat ${chatId}:`, error);
+      }, this.POLLING_INTERVAL);
     }
   }
-  
-  /**
-   * Stop polling for a specific chat
-   * @param chatId The ID of the chat to stop polling
-   */
-  public unsubscribeFromChat(chatId: string): void {
-    const interval = this.pollingIntervals.get(chatId);
-    if (interval) {
-      clearInterval(interval);
-      this.pollingIntervals.delete(chatId);
-      this.callbacks.delete(chatId);
-      this.lastMessageTimestamps.delete(chatId);
-      console.log(`Stopped message polling for chat ${chatId}`);
+
+  public unsubscribeFromChat(chatId: string) {
+    // Clear the polling interval
+    if (this.pollingIntervals[chatId]) {
+      clearInterval(this.pollingIntervals[chatId]);
+      delete this.pollingIntervals[chatId];
     }
+
+    // Clear the callbacks
+    delete this.callbacks[chatId];
   }
-  
-  /**
-   * Stop all polling
-   */
-  public unsubscribeFromAll(): void {
-    this.pollingIntervals.forEach((interval, chatId) => {
-      clearInterval(interval);
+
+  public unsubscribeFromAll() {
+    // Clear all polling intervals
+    Object.keys(this.pollingIntervals).forEach(chatId => {
+      clearInterval(this.pollingIntervals[chatId]);
     });
-    
-    this.pollingIntervals.clear();
-    this.callbacks.clear();
-    this.lastMessageTimestamps.clear();
-    
-    console.log('Stopped all message polling');
+
+    // Reset state
+    this.pollingIntervals = {};
+    this.callbacks = {};
   }
 }
 
