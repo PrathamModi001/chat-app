@@ -277,8 +277,60 @@ export default function ChatsPage() {
       const payload = JSON.parse(event.data);
       console.log('New message received:', payload);
       
-      // When a new message is received, refetch all messages for this chat
-      fetchInitialMessages();
+      // Check if the payload has the expected structure
+      const messageId = payload.new?.id || payload.id;
+      
+      if (!messageId) {
+        console.error('Invalid message payload:', payload);
+        return fetchInitialMessages(); // Fall back to full refresh
+      }
+      
+      // Instead of refetching all messages, just get the new message details
+      fetch(`/api/messages/${messageId}`)
+        .then(response => response.json())
+        .then(data => {
+          if (data.message) {
+            // Update the isSent property based on the current user
+            const newMessage = {
+              ...data.message,
+              isSent: data.message.sender_id === user?.id
+            };
+            
+            // Replace any temporary message or add this as a new message
+            setChatMessages(prevMessages => {
+              // Try to find and replace a temporary message
+              const hasTempMessage = prevMessages.some(msg => msg.id.toString().startsWith('temp-'));
+              
+              if (hasTempMessage) {
+                // Replace the first temporary message with the real one
+                return prevMessages.map(msg => 
+                  msg.id.toString().startsWith('temp-') ? newMessage : msg
+                );
+              } else {
+                // Just add the new message
+                return [...prevMessages, newMessage];
+              }
+            });
+            
+            // Do the same for filtered messages
+            setFilteredMessages(prevMessages => {
+              const hasTempMessage = prevMessages.some(msg => msg.id.toString().startsWith('temp-'));
+              
+              if (hasTempMessage) {
+                return prevMessages.map(msg => 
+                  msg.id.toString().startsWith('temp-') ? newMessage : msg
+                );
+              } else {
+                return [...prevMessages, newMessage];
+              }
+            });
+          }
+        })
+        .catch(error => {
+          console.error('Error fetching new message details:', error);
+          // Fall back to full refetch only if getting the message details fails
+          fetchInitialMessages();
+        });
     });
     
     // Listen for subscription status updates
@@ -287,31 +339,17 @@ export default function ChatsPage() {
       console.log('Message subscription status:', status);
     });
     
-    // Listen for server errors
-    eventSource.addEventListener('error', (event: MessageEvent) => {
-      try {
-        const errorData = JSON.parse(event.data || '{}');
-        console.error('Server reported error for messages:', errorData.message);
-      } catch (err) {
-        console.error('Error parsing server error for messages:', err);
-      }
-    });
-    
     // Handle connection errors
     eventSource.onerror = (error) => {
-      console.error('Messages EventSource connection failed:', error);
-      // Attempt to reconnect after a delay
-      setTimeout(() => {
-        eventSource.close();
-        // The browser will automatically attempt to reconnect when we create a new EventSource
-      }, 5000);
+      console.error('EventSource failed:', error);
+      eventSource.close();
     };
     
     // Cleanup: close EventSource when component unmounts or chat changes
     return () => {
       eventSource.close();
     };
-  }, [selectedChat]);
+  }, [selectedChat, user?.id]);
 
   // Scroll to bottom when messages change
   useEffect(() => {
@@ -329,6 +367,33 @@ export default function ChatsPage() {
   const sendMessage = async () => {
     if (!message.trim() || !selectedChat || !user) return;
     
+    // Store message text before clearing input
+    const messageText = message;
+    
+    // Clear the input field immediately for better UX
+    setMessage('');
+    
+    // Create an optimistic message to show immediately
+    const optimisticId = `temp-${Date.now()}`;
+    const optimisticMessage = {
+      id: optimisticId,
+      text: messageText,
+      time: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+      date: new Date().toLocaleDateString('en-US', { day: '2-digit', month: 'short', year: '2-digit' }),
+      sender: user.email || 'You',
+      sender_id: user.id,
+      email: user.email,
+      isSent: true,
+      isDelivered: false,
+      isRead: false,
+      message_type: 'text',
+      is_forwarded: false
+    };
+    
+    // Add optimistic message to UI immediately
+    setChatMessages(prev => [...prev, optimisticMessage]);
+    setFilteredMessages(prev => [...prev, optimisticMessage]);
+    
     try {
       const response = await fetch('/api/messages', {
         method: 'POST',
@@ -337,18 +402,21 @@ export default function ChatsPage() {
         },
         body: JSON.stringify({
           chatId: selectedChat,
-          content: message,
+          content: messageText,
           messageType: 'text'
         }),
       });
       
       if (!response.ok) {
         const data = await response.json();
+        // Remove the optimistic message on error
+        setChatMessages(prev => prev.filter(msg => msg.id !== optimisticId));
+        setFilteredMessages(prev => prev.filter(msg => msg.id !== optimisticId));
         throw new Error(data.error || 'Failed to send message');
       }
       
-      // Clear the input field - the rest will be handled by realtime subscriptions
-      setMessage('');
+      // The real message will be added by the realtime subscription,
+      // and we'll keep the optimistic message until then
     } catch (error) {
       console.error('Error sending message:', error);
       setError('Failed to send message. Please try again.');
@@ -395,7 +463,28 @@ export default function ChatsPage() {
   const groupMessagesByDate = () => {
     const groups: { [date: string]: Message[] } = {};
     
-    filteredMessages.forEach(msg => {
+    // Create a copy for sorting to ensure messages appear in chronological order
+    const sortedMessages = [...filteredMessages].sort((a, b) => {
+      // Special case for temporary messages (keep them at the end of their date group)
+      if (a.id.toString().startsWith('temp-') && !b.id.toString().startsWith('temp-')) {
+        return 1; // temp messages come last
+      } else if (!a.id.toString().startsWith('temp-') && b.id.toString().startsWith('temp-')) {
+        return -1; // non-temp messages come first
+      }
+      
+      // If same date, sort by time
+      if (a.date === b.date) {
+        const timeA = new Date(`${a.date} ${a.time}`).getTime();
+        const timeB = new Date(`${b.date} ${b.time}`).getTime();
+        return timeA - timeB;
+      }
+      
+      // Otherwise sort by date
+      return new Date(a.date).getTime() - new Date(b.date).getTime();
+    });
+    
+    // Group sorted messages by date
+    sortedMessages.forEach(msg => {
       if (!groups[msg.date]) {
         groups[msg.date] = [];
       }
@@ -833,12 +922,15 @@ export default function ChatsPage() {
                               <div className={`flex items-center ${!msg.isSent ? 'justify-end' : ''}`}>
                                 <span className="text-xs text-black mr-1">{msg.time}</span>
                                 {msg.isSent && (
-                        <span className="text-green-500">
-                          <FaCheck className="inline" />
+                                  <span className="text-green-500">
+                                    <FaCheck className="inline" />
                                     {msg.isRead && <FaCheck className="inline -ml-1" />}
-                        </span>
+                                    {msg.id.toString().startsWith('temp-') && (
+                                      <span className="text-xs text-black ml-1 italic">sending...</span>
+                                    )}
+                                  </span>
                                 )}
-                      </div>
+                              </div>
                     </div>
                   </div>
                 </div>
