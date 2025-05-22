@@ -3,6 +3,7 @@
 import { useAuth } from '@/lib/context/AuthContext';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState, useRef } from 'react';
+import Image from 'next/image';
 import { 
   FaUser, FaSearch, FaEllipsisV, FaPaperPlane, FaSmile, 
   FaPaperclip, FaMicrophone, FaHome, FaComments, FaChartLine,
@@ -295,8 +296,14 @@ export default function ChatsPage() {
       
       {/* Left sidebar with navigation icons */}
       <div className="w-16 bg-white border-r flex flex-col items-center py-4">
-        <div className="w-10 h-10 rounded-full bg-green-600 flex items-center justify-center text-white mb-8">
-          <FaUser />
+        <div className="w-10 h-10 mb-8">
+          <Image 
+            src="/download.png" 
+            alt="Periskope Logo" 
+            width={40}
+            height={40}
+            className="rounded-full"
+          />
         </div>
         <div className="flex flex-col space-y-6 items-center flex-1">
           <button className="p-3 text-gray-400 hover:text-gray-600">
@@ -400,7 +407,7 @@ export default function ChatsPage() {
                 className={`flex p-3 border-b cursor-pointer hover:bg-gray-50 ${selectedChat === chat.id ? 'bg-gray-100' : ''}`}
                 onClick={() => setSelectedChat(chat.id)}
               >
-                <div className="w-10 h-10 rounded-full bg-gray-300 flex-shrink-0 flex items-center justify-center text-gray-600 relative mr-3">
+                <div className="w-10 h-10 rounded-full bg-gray-200 flex-shrink-0 flex items-center justify-center text-gray-600 relative mr-3">
                   {(chat.name || 'Unknown').charAt(0).toUpperCase()}
                 </div>
                 <div className="flex-1 min-w-0">
@@ -454,7 +461,7 @@ export default function ChatsPage() {
                 {loadingMessages ? (
                   <div className="animate-pulse w-8 h-8 rounded-full bg-gray-200 mr-3"></div>
                 ) : (
-                  <div className="w-8 h-8 rounded-full bg-gray-300 flex items-center justify-center text-gray-600 mr-3">
+                  <div className="w-8 h-8 rounded-full bg-gray-200 flex items-center justify-center text-gray-600 mr-3">
                     {(chats.find(c => c.id === selectedChat)?.name || 'U').charAt(0).toUpperCase()}
                   </div>
                 )}
@@ -473,8 +480,8 @@ export default function ChatsPage() {
                   ) : (
                     <p className="text-xs text-gray-500 flex items-center">
                       {chats.find(c => c.id === selectedChat)?.participants?.filter(p => p.id !== user.id)[0]?.phone || ''}
-                                             <span className="mx-1">|</span>
-                       {chats.find(c => c.id === selectedChat)?.chat_type?.toLowerCase() || 'unknown'}
+                      <span className="mx-1">•</span>
+                      {chats.find(c => c.id === selectedChat)?.chat_type?.toLowerCase() || 'unknown'}
                     </p>
                   )}
                 </div>

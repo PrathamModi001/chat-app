@@ -16,6 +16,9 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Periskope Chat",
   description: "A simple chat application with authentication and messaging features",
+  icons: {
+    icon: '/favicon.png',
+  },
 };
 
 export default function RootLayout({
