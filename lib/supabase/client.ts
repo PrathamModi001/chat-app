@@ -6,7 +6,7 @@ let supabaseClient: ReturnType<typeof createClientComponentClient<Database>> | n
 export function createClient() {
   if (!supabaseClient) {
     // Simple initialization - just like in ChatContext.tsx
-    supabaseClient = createClientComponentClient<Database>();
+      supabaseClient = createClientComponentClient<Database>();
   }
   return supabaseClient;
 } 

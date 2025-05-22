@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/server';
 import { NextRequest, NextResponse } from 'next/server';
+import { cookies } from 'next/headers';
 
 // Helper for type safety
 type SafeAny = any;
@@ -63,7 +64,6 @@ export async function GET(request: NextRequest) {
         is_forwarded,
         created_at,
         delivered_at,
-        read_at,
         sender_id,
         reply_to_message_id,
         users!sender_id (
@@ -90,73 +90,129 @@ export async function GET(request: NextRequest) {
         { status: 500 }
       );
     }
+
+    // Parse messages to a typed format for easier usage
+    const typedMessages = messages as SafeAny[];
+    
+    // Get user ID for easier reference
+    const userId = session.user.id;
+    
+    // Fetch message status records for messages received by this user
+    const { data: messageStatusRecords, error: statusError } = await supabase
+      .from('message_status')
+      .select('message_id, status, read_at')
+      .eq('user_id', userId as any);
+
+    if (statusError) {
+      console.error('Error fetching message status:', statusError);
+    }
+    
+    // Identify messages sent by the current user
+    const sentMessageIds = typedMessages
+      .filter(msg => msg.sender_id === userId)
+      .map(msg => msg.id);
+      
+    // Fetch read receipts for messages sent by the current user (if any)
+    let readReceipts: any[] = [];
+    if (sentMessageIds.length > 0) {
+      const { data, error } = await supabase
+        .from('message_status')
+        .select('message_id, status')
+        .eq('status', 'read' as any)
+        .in('message_id', sentMessageIds);
+        
+      if (error) {
+        console.error('Error fetching read receipts:', error);
+      } else if (data) {
+        readReceipts = data;
+      }
+    }
+
+    // Create a map of message IDs to their read status by recipients
+    const readReceiptMap = new Map();
+    readReceipts.forEach(receipt => {
+      readReceiptMap.set(receipt.message_id, true);
+    });
+
+    // Create a map of message IDs to their status
+    const messageStatusMap = new Map();
+    if (messageStatusRecords) {
+      // Use type assertion to ensure messageStatusRecords is treated as an array
+      const typedStatusRecords = messageStatusRecords as any[];
+      typedStatusRecords.forEach(status => {
+        messageStatusMap.set(status.message_id, {
+          status: status.status,
+          read_at: status.read_at
+        });
+      });
+    }
     
     // Mark messages as read
-    const userId = session.user.id;
     const currentTime = new Date().toISOString();
     
-    // Find messages sent by others that are not read yet - use type assertion
-    const typedMessages = messages as SafeAny[];
+    // Find messages sent by others that are not read yet
     const unreadMessages = typedMessages.filter(msg => 
-      msg && msg.sender_id !== userId && !msg.read_at
+      msg && 
+      msg.sender_id !== userId && 
+      (!messageStatusMap.has(msg.id) || 
+       messageStatusMap.get(msg.id)?.status !== 'read')
     );
     
     if (unreadMessages.length > 0) {
-      // Update read_at for these messages
-      const { error: updateError } = await supabase
-        .from('messages')
-        .update({ read_at: currentTime } as any)
-        .in('id', unreadMessages.map(msg => msg.id));
-      
-      if (updateError) {
-        console.error('Error marking messages as read:', updateError);
-      }
-      
-      // Also update message_status table
+      // Update message_status table
       const statusUpdates = unreadMessages.map(msg => ({
         message_id: msg.id,
         user_id: userId,
         status: 'read' as const,
+        delivered_at: currentTime,
         read_at: currentTime
       }));
       
-      const { error: statusError } = await supabase
+      const { error: statusInsertError } = await supabase
         .from('message_status')
         .upsert(statusUpdates as any, { 
           onConflict: 'message_id,user_id',
           ignoreDuplicates: false
         });
       
-      if (statusError) {
-        console.error('Error updating message status:', statusError);
+      if (statusInsertError) {
+        console.error('Error updating message status:', statusInsertError);
       }
     }
     
-    // Format messages for the client - use type assertion
-    const formattedMessages = typedMessages.map(msg => ({
-      id: msg.id,
-      text: msg.content,
-      time: new Date(msg.created_at).toLocaleTimeString('en-US', { 
-        hour: '2-digit', 
-        minute: '2-digit',
-        hour12: true
-      }),
-      sender: msg.users?.full_name || 'Unknown',
-      sender_id: msg.sender_id,
-      phoneNumber: msg.users?.phone,
-      email: msg.users?.email,
-      isSent: msg.sender_id === userId,
-      date: new Date(msg.created_at).toLocaleDateString('en-US', {
-        day: '2-digit',
-        month: '2-digit',
-        year: 'numeric'
-      }),
-      isDelivered: !!msg.delivered_at,
-      isRead: !!msg.read_at,
-      message_type: msg.message_type,
-      is_forwarded: msg.is_forwarded,
-      reply_to_message_id: msg.reply_to_message_id
-    }));
+    // Format messages for the client
+    const formattedMessages = typedMessages.map(msg => {
+      // Check message status
+      const status = messageStatusMap.get(msg.id);
+      const isSent = msg.sender_id === userId;
+      
+      return {
+        id: msg.id,
+        text: msg.content,
+        time: new Date(msg.created_at).toLocaleTimeString('en-US', { 
+          hour: '2-digit', 
+          minute: '2-digit',
+          hour12: true
+        }),
+        sender: msg.users?.full_name || 'Unknown',
+        sender_id: msg.sender_id,
+        phoneNumber: msg.users?.phone,
+        email: msg.users?.email,
+        isSent: isSent,
+        date: new Date(msg.created_at).toLocaleDateString('en-US', {
+          day: '2-digit',
+          month: '2-digit',
+          year: 'numeric'
+        }),
+        isDelivered: true, // Always true since we're displaying one tick for pending
+        // For messages sent by current user, check if any recipient has read it
+        // For messages received by current user, check our own read status
+        isRead: isSent ? readReceiptMap.has(msg.id) : (status?.status === 'read'),
+        message_type: msg.message_type,
+        is_forwarded: msg.is_forwarded,
+        reply_to_message_id: msg.reply_to_message_id
+      };
+    });
     
     return NextResponse.json({ messages: formattedMessages });
   } catch (error) {
@@ -301,8 +357,8 @@ export async function POST(request: NextRequest) {
           month: '2-digit',
           year: 'numeric'
         }),
-        isDelivered: false,
-        isRead: false,
+        isDelivered: true, // Always true for one tick
+        isRead: false, // Not read yet
         message_type: typedMessage.message_type,
         is_forwarded: typedMessage.is_forwarded,
         reply_to_message_id: typedMessage.reply_to_message_id

@@ -54,18 +54,18 @@ class MessageService {
   }
 
   private async fetchMessages(chatId: string) {
-    try {
-      const response = await fetch(`/api/messages?chatId=${chatId}`);
-      if (!response.ok) {
-        throw new Error('Failed to fetch messages');
-      }
-      const data = await response.json();
-      
-      // Notify all callbacks for this chat
+        try {
+          const response = await fetch(`/api/messages?chatId=${chatId}`);
+          if (!response.ok) {
+            throw new Error('Failed to fetch messages');
+          }
+          const data = await response.json();
+          
+          // Notify all callbacks for this chat
       if (this.callbacks[chatId]) {
-        this.callbacks[chatId].forEach(cb => cb(data.messages || []));
+          this.callbacks[chatId].forEach(cb => cb(data.messages || []));
       }
-    } catch (error) {
+        } catch (error) {
       console.error('Error fetching messages:', error);
     }
   }
@@ -87,7 +87,7 @@ class MessageService {
       this.supabase.removeChannel(this.subscription);
       this.subscription = null;
     }
-    
+
     // Clear callbacks
     this.callbacks = {};
   }

@@ -86,43 +86,48 @@ export default function ChatsPage() {
   const [manageLabelsModalOpen, setManageLabelsModalOpen] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
+  // For tracking visible messages and marking them as read
+  const [visibleMessages, setVisibleMessages] = useState<Set<string>>(new Set());
+  const messageObserverRef = useRef<IntersectionObserver | null>(null);
+  const unreadMessageRefs = useRef<{[key: string]: HTMLDivElement | null}>({});
+  
   // Initialize realtime service when user is available
   useEffect(() => {
     if (!user) return;
     
     // Fetch initial chats
     const fetchInitialChats = async () => {
-      try {
-        setLoadingChats(true);
-        const response = await fetch('/api/chats');
-        if (!response.ok) {
-          throw new Error('Failed to fetch chats');
-        }
-        const data = await response.json();
-        setChats(data.chats || []);
-        
-        // Update filtered chats based on search query
-        if (!searchQuery.trim()) {
-          setFilteredChats(data.chats || []);
-        } else {
-          const query = searchQuery.toLowerCase();
-          const filtered = (data.chats || []).filter((chat: Chat) => {
-            if (chat.name?.toLowerCase().includes(query)) return true;
-            if (chat.participants?.some((p: User) => p.full_name.toLowerCase().includes(query))) return true;
-            if (chat.participants?.some((p: User) => p.phone?.includes(query))) return true;
-            if (chat.lastMessage?.content.toLowerCase().includes(query)) return true;
-            return false;
-          });
-          setFilteredChats(filtered);
-        }
-      } catch (error) {
-        console.error('Error fetching chats:', error);
-        setError('Failed to load chats. Please try again.');
-      } finally {
-        setLoadingChats(false);
+    try {
+      setLoadingChats(true);
+      const response = await fetch('/api/chats');
+      if (!response.ok) {
+        throw new Error('Failed to fetch chats');
       }
-    };
-    
+      const data = await response.json();
+      setChats(data.chats || []);
+      
+        // Update filtered chats based on search query
+      if (!searchQuery.trim()) {
+        setFilteredChats(data.chats || []);
+      } else {
+        const query = searchQuery.toLowerCase();
+        const filtered = (data.chats || []).filter((chat: Chat) => {
+          if (chat.name?.toLowerCase().includes(query)) return true;
+          if (chat.participants?.some((p: User) => p.full_name.toLowerCase().includes(query))) return true;
+          if (chat.participants?.some((p: User) => p.phone?.includes(query))) return true;
+          if (chat.lastMessage?.content.toLowerCase().includes(query)) return true;
+          return false;
+        });
+        setFilteredChats(filtered);
+      }
+    } catch (error) {
+      console.error('Error fetching chats:', error);
+      setError('Failed to load chats. Please try again.');
+    } finally {
+      setLoadingChats(false);
+    }
+  };
+
     fetchInitialChats();
     
     // Set up server-side EventSource for realtime updates
@@ -333,6 +338,27 @@ export default function ChatsPage() {
         });
     });
     
+    // Listen for read receipts
+    eventSource.addEventListener('message_read', (event: MessageEvent) => {
+      const payload = JSON.parse(event.data);
+      console.log('Message read notification:', payload);
+      
+      if (payload.new && payload.new.id) {
+        // Update the read status of this message locally
+        setChatMessages(prevMessages => 
+          prevMessages.map(msg => 
+            msg.id === payload.new.id ? { ...msg, isRead: true } : msg
+          )
+        );
+        
+        setFilteredMessages(prevMessages => 
+          prevMessages.map(msg => 
+            msg.id === payload.new.id ? { ...msg, isRead: true } : msg
+          )
+        );
+      }
+    });
+    
     // Listen for subscription status updates
     eventSource.addEventListener('subscription_status', (event: MessageEvent) => {
       const status = JSON.parse(event.data);
@@ -362,6 +388,103 @@ export default function ChatsPage() {
       setSelectedChat(chats[0].id);
     }
   }, [chats, selectedChat, loadingChats]);
+
+  // Set up intersection observer to track which messages are visible
+  useEffect(() => {
+    // Cleanup previous observer
+    if (messageObserverRef.current) {
+      messageObserverRef.current.disconnect();
+    }
+    
+    // Create a new observer
+    messageObserverRef.current = new IntersectionObserver(
+      (entries) => {
+        // Track newly visible messages
+        const newVisibleMessages = new Set(visibleMessages);
+        let hasNewVisibleMessages = false;
+        
+        entries.forEach(entry => {
+          const messageId = entry.target.getAttribute('data-message-id');
+          if (messageId && entry.isIntersecting && !newVisibleMessages.has(messageId)) {
+            newVisibleMessages.add(messageId);
+            hasNewVisibleMessages = true;
+          }
+        });
+        
+        // Update visible messages state if changed
+        if (hasNewVisibleMessages) {
+          setVisibleMessages(newVisibleMessages);
+        }
+      },
+      { threshold: 0.5 } // Message is considered visible when 50% is in view
+    );
+    
+    // Observe all unread message elements
+    Object.entries(unreadMessageRefs.current).forEach(([messageId, element]) => {
+      if (element) {
+        messageObserverRef.current?.observe(element);
+      }
+    });
+    
+    return () => {
+      messageObserverRef.current?.disconnect();
+    };
+  }, [chatMessages, visibleMessages]);
+  
+  // Mark messages as read when they become visible
+  useEffect(() => {
+    if (!selectedChat || !user || visibleMessages.size === 0) return;
+    
+    // Get unread, non-sent messages (messages from others) that are now visible
+    const unreadMessageIds = chatMessages
+      .filter(msg => 
+        !msg.isSent && 
+        !msg.isRead && 
+        visibleMessages.has(msg.id) &&
+        !msg.id.toString().startsWith('temp-')
+      )
+      .map(msg => msg.id);
+    
+    if (unreadMessageIds.length === 0) return;
+    
+    // Mark these messages as read locally first
+    setChatMessages(prevMessages => 
+      prevMessages.map(msg => 
+        unreadMessageIds.includes(msg.id) 
+          ? { ...msg, isRead: true } 
+          : msg
+      )
+    );
+    
+    setFilteredMessages(prevMessages => 
+      prevMessages.map(msg => 
+        unreadMessageIds.includes(msg.id) 
+          ? { ...msg, isRead: true } 
+          : msg
+      )
+    );
+    
+    // Send read status to server
+    fetch('/api/messages/read', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        messageIds: unreadMessageIds,
+        chatId: selectedChat
+      }),
+    })
+    .then(response => {
+      if (!response.ok) {
+        console.error('Failed to mark messages as read');
+      }
+    })
+    .catch(error => {
+      console.error('Error marking messages as read:', error);
+    });
+    
+  }, [selectedChat, user, visibleMessages, chatMessages]);
 
   // Send message
   const sendMessage = async () => {
@@ -900,7 +1023,22 @@ export default function ChatsPage() {
 
                     {/* Messages for this date */}
                     {messages.map((msg, index) => (
-                      <div key={msg.id} className={`mb-3 ${msg.isSent ? 'flex justify-end' : 'flex items-start'}`}>
+                      <div 
+                        key={msg.id} 
+                        className={`mb-3 ${msg.isSent ? 'flex justify-end' : 'flex items-start'}`}
+                        data-message-id={msg.id}
+                        ref={el => {
+                          // Only track non-sent, unread messages for visibility
+                          if (!msg.isSent && !msg.isRead && !msg.id.toString().startsWith('temp-')) {
+                            unreadMessageRefs.current[msg.id] = el;
+                          } else {
+                            // Clean up references that are no longer needed
+                            if (unreadMessageRefs.current[msg.id]) {
+                              delete unreadMessageRefs.current[msg.id];
+                            }
+                          }
+                        }}
+                      >
                         {!msg.isSent && (
                           <div className="flex-shrink-0 w-8 h-8 rounded-full bg-gray-300 flex items-center justify-center text-gray-600 mr-2">
                             {msg.sender.charAt(0).toUpperCase()}
@@ -922,15 +1060,18 @@ export default function ChatsPage() {
                               <div className={`flex items-center ${!msg.isSent ? 'justify-end' : ''}`}>
                                 <span className="text-xs text-black mr-1">{msg.time}</span>
                                 {msg.isSent && (
-                                  <span className="text-green-500">
-                                    <FaCheck className="inline" />
-                                    {msg.isRead && <FaCheck className="inline -ml-1" />}
-                                    {msg.id.toString().startsWith('temp-') && (
-                                      <span className="text-xs text-black ml-1 italic">sending...</span>
+                                  <span className="text-green-500 flex items-center">
+                                    {msg.id.toString().startsWith('temp-') ? (
+                                      <span className="text-xs text-black italic">sending...</span>
+                                    ) : (
+                                      <>
+                                        <FaCheck className="inline" />
+                                        {msg.isRead && <FaCheck className="inline -ml-1" />}
+                                      </>
                                     )}
                                   </span>
                                 )}
-                              </div>
+                      </div>
                     </div>
                   </div>
                 </div>

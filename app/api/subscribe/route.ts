@@ -105,6 +105,33 @@ export async function GET(request: Request) {
             });
         }
         
+        // Add a subscription for read receipts
+        if (chatId) {
+          const readStatusChannel = supabase
+            .channel(`read-status-channel-${sessionId}-${chatId}`)
+            .on('postgres_changes', {
+              event: 'UPDATE',
+              schema: 'public',
+              table: 'messages',
+              filter: `chat_id=eq.${chatId}`,
+            }, (payload) => {
+              if (connected && payload.new && payload.old) {
+                // Only send if read_at changed from null to a value
+                if (!payload.old.read_at && payload.new.read_at) {
+                  safeSend(`event: message_read\ndata: ${JSON.stringify(payload)}\n\n`);
+                }
+              }
+            })
+            .subscribe((status) => {
+              console.log(`Read status channel ${chatId} status:`, status);
+              if (connected) {
+                safeSend(`event: subscription_status\ndata: ${JSON.stringify({ channel: 'read-status', status })}\n\n`);
+              }
+            });
+          
+          channels.push(readStatusChannel);
+        }
+        
         // Keep the connection alive with a ping every 15 seconds
         pingInterval = setInterval(() => {
           if (connected) {
