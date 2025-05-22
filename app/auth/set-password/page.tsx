@@ -1,12 +1,13 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Suspense } from 'react';
 import { FaLock } from 'react-icons/fa';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { useAuth } from '@/lib/context/AuthContext';
 
-export default function SetPassword() {
+// This is the new component that will contain the form logic
+function SetPasswordForm() {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState('');
@@ -61,13 +62,11 @@ export default function SetPassword() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    // Validate passwords match
     if (password !== confirmPassword) {
       setError('Passwords do not match');
       return;
     }
     
-    // Validate password strength
     if (password.length < 8) {
       setError('Password must be at least 8 characters long');
       return;
@@ -87,7 +86,6 @@ export default function SetPassword() {
     }
   };
 
-  // Show loading state while validating token
   if (validatingToken) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-gray-50 p-4 dark:bg-gray-900">
@@ -202,5 +200,14 @@ export default function SetPassword() {
         </div>
       </div>
     </div>
+  );
+}
+
+// This is the page component that wraps SetPasswordForm with Suspense
+export default function SetPasswordPage() {
+  return (
+    <Suspense fallback={<div>Loading page...</div>}> 
+      <SetPasswordForm />
+    </Suspense>
   );
 } 

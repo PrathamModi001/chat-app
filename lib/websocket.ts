@@ -1,9 +1,12 @@
-// MessageService class for handling real-time message updates using polling
+// RealtimeService class for handling real-time updates using Supabase
+import { createClient } from './supabase/client';
+
+// MessageService class for handling real-time message updates
 class MessageService {
   private static instance: MessageService;
-  private pollingIntervals: { [chatId: string]: NodeJS.Timeout } = {};
   private callbacks: { [chatId: string]: ((messages: any[]) => void)[] } = {};
-  private POLLING_INTERVAL = 3000; // 3 seconds
+  private supabase = createClient();
+  private subscription: any = null;
 
   private constructor() {}
 
@@ -21,44 +24,71 @@ class MessageService {
     }
     this.callbacks[chatId].push(callback);
 
-    // If no polling interval exists for this chat, create one
-    if (!this.pollingIntervals[chatId]) {
-      this.pollingIntervals[chatId] = setInterval(async () => {
-        try {
-          const response = await fetch(`/api/messages?chatId=${chatId}`);
-          if (!response.ok) {
-            throw new Error('Failed to fetch messages');
+    // Fetch initial messages
+    this.fetchMessages(chatId);
+
+    // Set up subscription if not already active
+    if (!this.subscription) {
+      // Create a single channel for all message changes, exactly like in ChatContext.tsx
+      this.subscription = this.supabase
+        .channel("messages-channel")
+        .on(
+          "postgres_changes",
+          {
+            event: "INSERT",
+            schema: "public",
+            table: "messages",
+          },
+          (payload) => {
+            const newMessage = payload.new;
+            const messagesChatId = newMessage.chat_id;
+            
+            // If we have callbacks for this chat, fetch updated messages
+            if (this.callbacks[messagesChatId]) {
+              this.fetchMessages(messagesChatId);
+            }
           }
-          const data = await response.json();
-          
-          // Notify all callbacks for this chat
-          this.callbacks[chatId].forEach(cb => cb(data.messages || []));
-        } catch (error) {
-          console.error('Error polling messages:', error);
-        }
-      }, this.POLLING_INTERVAL);
+        )
+        .subscribe();
+    }
+  }
+
+  private async fetchMessages(chatId: string) {
+    try {
+      const response = await fetch(`/api/messages?chatId=${chatId}`);
+      if (!response.ok) {
+        throw new Error('Failed to fetch messages');
+      }
+      const data = await response.json();
+      
+      // Notify all callbacks for this chat
+      if (this.callbacks[chatId]) {
+        this.callbacks[chatId].forEach(cb => cb(data.messages || []));
+      }
+    } catch (error) {
+      console.error('Error fetching messages:', error);
     }
   }
 
   public unsubscribeFromChat(chatId: string) {
-    // Clear the polling interval
-    if (this.pollingIntervals[chatId]) {
-      clearInterval(this.pollingIntervals[chatId]);
-      delete this.pollingIntervals[chatId];
-    }
-
-    // Clear the callbacks
+    // Remove callbacks for this chat
     delete this.callbacks[chatId];
+    
+    // If no more callbacks, remove subscription
+    if (Object.keys(this.callbacks).length === 0 && this.subscription) {
+      this.supabase.removeChannel(this.subscription);
+      this.subscription = null;
+    }
   }
 
   public unsubscribeFromAll() {
-    // Clear all polling intervals
-    Object.keys(this.pollingIntervals).forEach(chatId => {
-      clearInterval(this.pollingIntervals[chatId]);
-    });
-
-    // Reset state
-    this.pollingIntervals = {};
+    // Clear subscription
+    if (this.subscription) {
+      this.supabase.removeChannel(this.subscription);
+      this.subscription = null;
+    }
+    
+    // Clear callbacks
     this.callbacks = {};
   }
 }

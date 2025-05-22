@@ -10,7 +10,6 @@ import {
   FaFileAlt, FaCog, FaUsers, FaFilter, FaSave, FaSync, FaPhone,
   FaQuestion, FaCheck, FaTags
 } from 'react-icons/fa';
-import MessageService from '@/lib/websocket';
 import NewChatModal from '@/components/NewChatModal';
 import ManageLabelsModal from '@/components/ManageLabelsModal';
 
@@ -86,73 +85,92 @@ export default function ChatsPage() {
   const [newChatModalOpen, setNewChatModalOpen] = useState(false);
   const [manageLabelsModalOpen, setManageLabelsModalOpen] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const messageService = MessageService.getInstance();
 
-  // Function to fetch messages for the selected chat
-  const fetchMessages = async () => {
-    if (!selectedChat) return;
-    
-    try {
-      setLoadingMessages(true);
-      const response = await fetch(`/api/messages?chatId=${selectedChat}`);
-      
-      if (!response.ok) {
-        throw new Error('Failed to fetch messages');
-      }
-      
-      const data = await response.json();
-      setChatMessages(data.messages || []);
-      setFilteredMessages(data.messages || []);
-    } catch (error) {
-      console.error('Error fetching messages:', error);
-      setError('Failed to load messages. Please try again.');
-    } finally {
-      setLoadingMessages(false);
-    }
-  };
-
-  // Function to refresh chats
-  const refreshChats = async () => {
+  // Initialize realtime service when user is available
+  useEffect(() => {
     if (!user) return;
     
-    try {
-      setLoadingChats(true);
-      const response = await fetch('/api/chats');
-      if (!response.ok) {
-        throw new Error('Failed to fetch chats');
+    // Fetch initial chats
+    const fetchInitialChats = async () => {
+      try {
+        setLoadingChats(true);
+        const response = await fetch('/api/chats');
+        if (!response.ok) {
+          throw new Error('Failed to fetch chats');
+        }
+        const data = await response.json();
+        setChats(data.chats || []);
+        
+        // Update filtered chats based on search query
+        if (!searchQuery.trim()) {
+          setFilteredChats(data.chats || []);
+        } else {
+          const query = searchQuery.toLowerCase();
+          const filtered = (data.chats || []).filter((chat: Chat) => {
+            if (chat.name?.toLowerCase().includes(query)) return true;
+            if (chat.participants?.some((p: User) => p.full_name.toLowerCase().includes(query))) return true;
+            if (chat.participants?.some((p: User) => p.phone?.includes(query))) return true;
+            if (chat.lastMessage?.content.toLowerCase().includes(query)) return true;
+            return false;
+          });
+          setFilteredChats(filtered);
+        }
+      } catch (error) {
+        console.error('Error fetching chats:', error);
+        setError('Failed to load chats. Please try again.');
+      } finally {
+        setLoadingChats(false);
       }
-      const data = await response.json();
-      setChats(data.chats || []);
-      
-      // If there's no search query, also update filteredChats
-      if (!searchQuery.trim()) {
-        setFilteredChats(data.chats || []);
-      } else {
-        // Re-apply filter with new data
-        const query = searchQuery.toLowerCase();
-        const filtered = (data.chats || []).filter((chat: Chat) => {
-          if (chat.name?.toLowerCase().includes(query)) return true;
-          if (chat.participants?.some((p: User) => p.full_name.toLowerCase().includes(query))) return true;
-          if (chat.participants?.some((p: User) => p.phone?.includes(query))) return true;
-          if (chat.lastMessage?.content.toLowerCase().includes(query)) return true;
-          return false;
-        });
-        setFilteredChats(filtered);
+    };
+    
+    fetchInitialChats();
+    
+    // Set up server-side EventSource for realtime updates
+    const eventSource = new EventSource('/api/subscribe');
+    
+    // Listen for chat updates
+    eventSource.addEventListener('chat_update', (event: MessageEvent) => {
+      console.log('Chats updated, refreshing');
+      fetchInitialChats();
+    });
+    
+    // Listen for new messages that affect chats
+    eventSource.addEventListener('message_affects_chat', (event: MessageEvent) => {
+      console.log('New message affecting chats, refreshing chat list');
+      fetchInitialChats();
+    });
+    
+    // Listen for subscription status updates
+    eventSource.addEventListener('subscription_status', (event: MessageEvent) => {
+      const status = JSON.parse(event.data);
+      console.log('Subscription status:', status);
+    });
+    
+    // Listen for server errors
+    eventSource.addEventListener('error', (event: MessageEvent) => {
+      try {
+        const errorData = JSON.parse(event.data || '{}');
+        console.error('Server reported error:', errorData.message);
+      } catch (err) {
+        console.error('Error parsing server error:', err);
       }
-    } catch (error) {
-      console.error('Error fetching chats:', error);
-      setError('Failed to load chats. Please try again.');
-    } finally {
-      setLoadingChats(false);
-    }
-  };
-
-  // Fetch chats on mount
-  useEffect(() => {
-    if (user) {
-      refreshChats();
-    }
-  }, [user]);
+    });
+    
+    // Handle connection errors
+    eventSource.onerror = (error) => {
+      console.error('EventSource connection failed:', error);
+      // Attempt to reconnect after a delay
+      setTimeout(() => {
+        eventSource.close();
+        // The browser will automatically attempt to reconnect when we create a new EventSource
+      }, 5000);
+    };
+    
+    // Cleanup on unmount
+    return () => {
+      eventSource.close();
+    };
+  }, [user, searchQuery]);
 
   // Filter chats based on search query
   useEffect(() => {
@@ -186,7 +204,7 @@ export default function ChatsPage() {
     setFilteredChats(filtered);
   }, [chats, searchQuery]);
 
-  // Filter messages based on search query
+  // Handle message search - using the API for message search still makes sense
   useEffect(() => {
     if (!selectedChat) return;
     
@@ -224,65 +242,81 @@ export default function ChatsPage() {
     return () => clearTimeout(timerId);
   }, [selectedChat, messageSearchQuery]);
 
-  // Fetch messages when a chat is selected
+  // When a chat is selected, fetch initial messages and subscribe to realtime updates
   useEffect(() => {
     if (!selectedChat) return;
     
-    // Call our fetchMessages function
-    fetchMessages();
-    
-    // Set up message monitoring for the selected chat
-    if (selectedChat) {
-      // Subscribe to new messages using our polling service
-      messageService.subscribeToChat(selectedChat, (newMessages) => {
-        console.log("Received new messages:", newMessages);
+    // Fetch initial messages
+    const fetchInitialMessages = async () => {
+      try {
+        setLoadingMessages(true);
+        const response = await fetch(`/api/messages?chatId=${selectedChat}`);
         
-        // If we're searching, we need to add the new message and then reapply the search filter
-        if (isSearchOpen && messageSearchQuery.trim()) {
-          // Check if the new message matches our search criteria
-          Promise.all([
-            fetch(`/api/messages?chatId=${selectedChat}&search=${encodeURIComponent(messageSearchQuery.trim())}`).then(res => res.json()),
-            fetch('/api/chats').then(res => res.json())
-          ])
-          .then(([messagesData, chatsData]) => {
-            setFilteredMessages(messagesData.messages || []);
-            setChats(chatsData.chats || []);
-            setFilteredChats(filtered ? chatsData.chats || [] : []);
-          })
-          .catch(err => {
-            console.error('Error updating after new messages during search:', err);
-          });
-        } else {
-          // If not searching, refresh both messages and chats
-          Promise.all([
-            fetch(`/api/messages?chatId=${selectedChat}`).then(res => res.json()),
-            fetch('/api/chats').then(res => res.json())
-          ])
-          .then(([messagesData, chatsData]) => {
-            setChatMessages(messagesData.messages || []);
-            setFilteredMessages(messagesData.messages || []);
-            setChats(chatsData.chats || []);
-            setFilteredChats(filtered ? chatsData.chats || [] : []);
-          })
-          .catch(err => {
-            console.error('Error updating after new messages:', err);
-          });
+        if (!response.ok) {
+          throw new Error('Failed to fetch messages');
         }
-      });
-    }
-
-    // Cleanup: unsubscribe when component unmounts or chat changes
-    return () => {
-      if (selectedChat) {
-        messageService.unsubscribeFromChat(selectedChat);
+        
+        const data = await response.json();
+        setChatMessages(data.messages || []);
+        setFilteredMessages(data.messages || []);
+      } catch (error) {
+        console.error('Error fetching messages:', error);
+        setError('Failed to load messages. Please try again.');
+      } finally {
+        setLoadingMessages(false);
       }
+    };
+    
+    fetchInitialMessages();
+    
+    // Set up server-side EventSource for realtime message updates
+    const eventSource = new EventSource(`/api/subscribe?chatId=${selectedChat}`);
+    
+    // Listen for new messages
+    eventSource.addEventListener('new_message', (event: MessageEvent) => {
+      const payload = JSON.parse(event.data);
+      console.log('New message received:', payload);
+      
+      // When a new message is received, refetch all messages for this chat
+      fetchInitialMessages();
+    });
+    
+    // Listen for subscription status updates
+    eventSource.addEventListener('subscription_status', (event: MessageEvent) => {
+      const status = JSON.parse(event.data);
+      console.log('Message subscription status:', status);
+    });
+    
+    // Listen for server errors
+    eventSource.addEventListener('error', (event: MessageEvent) => {
+      try {
+        const errorData = JSON.parse(event.data || '{}');
+        console.error('Server reported error for messages:', errorData.message);
+      } catch (err) {
+        console.error('Error parsing server error for messages:', err);
+      }
+    });
+    
+    // Handle connection errors
+    eventSource.onerror = (error) => {
+      console.error('Messages EventSource connection failed:', error);
+      // Attempt to reconnect after a delay
+      setTimeout(() => {
+        eventSource.close();
+        // The browser will automatically attempt to reconnect when we create a new EventSource
+      }, 5000);
+    };
+    
+    // Cleanup: close EventSource when component unmounts or chat changes
+    return () => {
+      eventSource.close();
     };
   }, [selectedChat]);
 
   // Scroll to bottom when messages change
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [chatMessages]);
+  }, [filteredMessages]);
 
   // Set the first chat as selected by default
   useEffect(() => {
@@ -290,13 +324,6 @@ export default function ChatsPage() {
       setSelectedChat(chats[0].id);
     }
   }, [chats, selectedChat, loadingChats]);
-
-  // Cleanup polling on unmount
-  useEffect(() => {
-    return () => {
-      messageService.unsubscribeFromAll();
-    };
-  }, []);
 
   // Send message
   const sendMessage = async () => {
@@ -320,17 +347,8 @@ export default function ChatsPage() {
         throw new Error(data.error || 'Failed to send message');
       }
       
-      const data = await response.json();
-      
-      // Add the new message to the chat
-      setChatMessages(prev => [...prev, data.message]);
-      setFilteredMessages(prev => [...prev, data.message]);
-      
-      // Clear the input field
+      // Clear the input field - the rest will be handled by realtime subscriptions
       setMessage('');
-      
-      // Refresh the chat list to show the updated last message
-      refreshChats();
     } catch (error) {
       console.error('Error sending message:', error);
       setError('Failed to send message. Please try again.');
@@ -391,10 +409,7 @@ export default function ChatsPage() {
 
   // Handle new chat creation
   const handleChatCreated = (chatId: string) => {
-    // Refresh the chat list
-    refreshChats();
-    
-    // Select the new chat
+    // Select the new chat - the realtime service will update the chat list
     setSelectedChat(chatId);
   };
 
@@ -451,13 +466,7 @@ export default function ChatsPage() {
             <h1 className="font-medium text-sm text-gray-600">CHATS</h1>
           </div>
           <div className="flex space-x-3">
-            <button className="text-black hover:text-gray-800" onClick={refreshChats}>
-              <FaSync />
-            </button>
-            <button 
-              className="text-green-500 hover:text-green-700 font-bold"
-              onClick={() => setNewChatModalOpen(true)}
-            >
+            <button className="text-black hover:text-gray-800" onClick={() => setNewChatModalOpen(true)}>
               +
             </button>
             <button className="text-black hover:text-gray-800">
@@ -663,7 +672,18 @@ export default function ChatsPage() {
                       setIsSearchOpen(false);
                       setMessageSearchQuery('');
                       // Reset to original messages without search
-                      fetchMessages();
+                      setLoadingMessages(true);
+                      fetch(`/api/messages?chatId=${selectedChat}`)
+                        .then(res => res.json())
+                        .then(data => {
+                          setChatMessages(data.messages || []);
+                          setFilteredMessages(data.messages || []);
+                          setLoadingMessages(false);
+                        })
+                        .catch(err => {
+                          console.error('Error refreshing messages:', err);
+                          setLoadingMessages(false);
+                        });
                     } else {
                       // Open search with empty string to start
                       setIsSearchOpen(true);
@@ -702,7 +722,18 @@ export default function ChatsPage() {
                     setMessageSearchQuery('');
                     if (messageSearchQuery.trim()) {
                       // If there was a search query, refetch all messages
-                      fetchMessages();
+                      setLoadingMessages(true);
+                      fetch(`/api/messages?chatId=${selectedChat}`)
+                        .then(res => res.json())
+                        .then(data => {
+                          setChatMessages(data.messages || []);
+                          setFilteredMessages(data.messages || []);
+                          setLoadingMessages(false);
+                        })
+                        .catch(err => {
+                          console.error('Error refreshing messages:', err);
+                          setLoadingMessages(false);
+                        });
                     }
                   }}
                 >
@@ -875,7 +906,7 @@ export default function ChatsPage() {
           onClose={() => setManageLabelsModalOpen(false)}
           chatId={selectedChat}
           chatName={chats.find(c => c.id === selectedChat)?.name || 'Unknown Chat'}
-          onLabelApplied={() => refreshChats()}
+          onLabelApplied={() => {}}
         />
       )}
     </div>
