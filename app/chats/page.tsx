@@ -2,26 +2,60 @@
 
 import { useAuth } from '@/lib/context/AuthContext';
 import { useRouter } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { 
   FaUser, FaSearch, FaEllipsisV, FaPaperPlane, FaSmile, 
   FaPaperclip, FaMicrophone, FaHome, FaComments, FaChartLine,
   FaFileAlt, FaCog, FaUsers, FaFilter, FaSave, FaSync, FaPhone,
   FaQuestion, FaCheck
 } from 'react-icons/fa';
+import MessageService from '@/lib/websocket';
+import NewChatModal from '@/components/NewChatModal';
+
+interface User {
+  id: string;
+  full_name: string;
+  phone?: string;
+  email?: string;
+  profile_image_url?: string;
+}
+
+interface Message {
+  id: string;
+  text: string;
+  time: string;
+  sender: string;
+  sender_id: string;
+  phoneNumber?: string;
+  email?: string;
+  isSent: boolean;
+  date: string;
+  isDelivered: boolean;
+  isRead: boolean;
+  message_type: string;
+  is_forwarded: boolean;
+  reply_to_message_id?: string;
+}
 
 interface Chat {
   id: string;
-  name: string;
-  lastMessage?: string;
-  lastMessagePrefix?: string;
-  date: string;
-  unread?: number;
-  status?: 'online' | 'offline';
-  type?: 'demo' | 'internal' | 'content' | 'signup' | 'standard';
-  phoneNumber?: string;
-  isForwarded?: boolean;
-  avatar?: string;
+  name?: string;
+  description?: string;
+  lastMessage?: {
+    id: string;
+    content: string;
+    created_at: string;
+    sender_id: string;
+    sender_name: string;
+    message_type: string;
+    is_forwarded: boolean;
+  };
+  created_at: string;
+  updated_at: string;
+  unread: number;
+  is_group: boolean;
+  chat_type: 'Demo' | 'Internal' | 'Signup' | 'Content' | 'Dont Send';
+  participants: User[];
 }
 
 export default function ChatsPage() {
@@ -31,158 +65,159 @@ export default function ChatsPage() {
   const [message, setMessage] = useState('');
   const [filtered, setFiltered] = useState(true);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [chats, setChats] = useState<Chat[]>([]);
+  const [chatMessages, setChatMessages] = useState<Message[]>([]);
+  const [loadingChats, setLoadingChats] = useState(true);
+  const [loadingMessages, setLoadingMessages] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [newChatModalOpen, setNewChatModalOpen] = useState(false);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messageService = MessageService.getInstance();
 
-  // Sample chat data mimicking the screenshot
-  const chats: Chat[] = [
-    {
-      id: '1',
-      name: 'Test El Centro',
-      lastMessage: 'Hello, Livonia!',
-      date: '23-01-2025',
-      type: 'demo',
-      phoneNumber: '+91 99713 44098'
-    },
-    {
-      id: '2',
-      name: 'Test Skope Final 5',
-      lastMessagePrefix: 'Support2:',
-      lastMessage: "This doesn't go on Tuesday...",
-      date: 'Yesterday',
-      type: 'demo',
-      phoneNumber: '+91 99713 44098'
-    },
-    {
-      id: '3',
-      name: 'Periskope Team Chat',
-      lastMessagePrefix: 'Periskope:',
-      lastMessage: 'Test message',
-      date: '28-Feb-25',
-      unread: 1,
-      type: 'internal',
-      phoneNumber: '+91 99713 44098'
-    },
-    {
-      id: '4',
-      name: '+91 99999 99999',
-      lastMessagePrefix: '',
-      lastMessage: "Hi there, I'm Swapnika, Co-Founder of...",
-      date: '25-Feb-25',
-      type: 'signup',
-      phoneNumber: '+91 92899 99999'
-    },
-    {
-      id: '5',
-      name: 'Test Demo17',
-      lastMessagePrefix: 'Rohosen:',
-      lastMessage: '123',
-      date: '25-Feb-25',
-      type: 'content',
-      phoneNumber: '+91 99713 44098'
-    },
-    {
-      id: '6',
-      name: 'Testing group',
-      lastMessagePrefix: '',
-      lastMessage: 'Testing 12345',
-      date: '27-Jan-25',
-      type: 'demo',
-      phoneNumber: '+91 92899 99999'
-    },
-    {
-      id: '7',
-      name: 'Yasin 3',
-      lastMessagePrefix: '',
-      lastMessage: 'First Bulk Message',
-      date: '25-Nov-24',
-      type: 'demo',
-      phoneNumber: '+91 99713 44098'
+  // Function to refresh chats
+  const refreshChats = async () => {
+    if (!user) return;
+    
+    try {
+      setLoadingChats(true);
+      const response = await fetch('/api/chats');
+      if (!response.ok) {
+        throw new Error('Failed to fetch chats');
+      }
+      const data = await response.json();
+      setChats(data.chats || []);
+    } catch (error) {
+      console.error('Error fetching chats:', error);
+      setError('Failed to load chats. Please try again.');
+    } finally {
+      setLoadingChats(false);
     }
-  ];
+  };
 
-  // Sample messages for selected chat
-  const chatMessages = [
-    {
-      id: '1',
-      text: 'Hello, South Euna!',
-      time: '08:01',
-      sender: 'Roshniag Airtel',
-      phoneNumber: '+91 63846 47925',
-      isSent: false,
-      date: '23-01-2025',
-      position: 'top',
-      isDelivered: false,
-      isRead: false
-    },
-    {
-      id: '2',
-      text: 'CDERT',
-      time: '11:54',
-      sender: 'CDERT',
-      isSent: false,
-      position: 'middle',
-      isDelivered: false,
-      isRead: false
-    },
-    {
-      id: '3',
-      text: 'CYFER',
-      time: '11:51',
-      sender: 'CYFER',
-      isSent: false,
-      position: 'bottom',
-      isDelivered: false,
-      isRead: false
-    },
-    {
-      id: '4',
-      text: 'hello',
-      time: '12:07',
-      sender: 'Periskope',
-      phoneNumber: '+91 99713 44098',
-      isSent: true,
-      position: 'single',
-      isDelivered: true,
-      isRead: true
-    },
-    {
-      id: '5',
-      text: 'test el centro',
-      time: '09:49',
-      sender: 'Periskope',
-      phoneNumber: '+91 99713 44098',
-      isSent: true,
-      position: 'single',
-      isDelivered: true,
-      isRead: true,
-      email: 'chang@neimoidia.dev',
-      date: '23-01-2025'
-    },
-    {
-      id: '6',
-      text: 'testing',
-      time: '09:49',
-      sender: 'Periskope',
-      phoneNumber: '+91 99713 44098',
-      isSent: true,
-      position: 'single',
-      isDelivered: true,
-      isRead: true,
-      email: 'chang@neimoidia.dev',
-      date: '23-01-2025'
-    }
-  ];
-
+  // Fetch chats on mount
   useEffect(() => {
-    // If user is not authenticated and not loading, redirect to login
-    if (!user && !loading) {
-      router.push('/login');
+    if (user) {
+      refreshChats();
+    }
+  }, [user]);
+
+  // Fetch messages when a chat is selected
+  useEffect(() => {
+    async function fetchMessages() {
+      if (!selectedChat) return;
+      
+      try {
+        setLoadingMessages(true);
+        const response = await fetch(`/api/messages?chatId=${selectedChat}`);
+        
+        if (!response.ok) {
+          throw new Error('Failed to fetch messages');
+        }
+        
+        const data = await response.json();
+        setChatMessages(data.messages || []);
+      } catch (error) {
+        console.error('Error fetching messages:', error);
+        setError('Failed to load messages. Please try again.');
+      } finally {
+        setLoadingMessages(false);
+      }
     }
 
-    // Set the first chat as selected by default for demo
-    if (chats.length > 0 && !selectedChat) {
+    fetchMessages();
+    
+    // Set up message monitoring for the selected chat
+    if (selectedChat) {
+      // Subscribe to new messages using our polling service
+      messageService.subscribeToChat(selectedChat, (newMessages) => {
+        console.log("Received new messages:", newMessages);
+        
+        // Refresh both messages and chats
+        Promise.all([
+          fetch(`/api/messages?chatId=${selectedChat}`).then(res => res.json()),
+          fetch('/api/chats').then(res => res.json())
+        ])
+        .then(([messagesData, chatsData]) => {
+          setChatMessages(messagesData.messages || []);
+          setChats(chatsData.chats || []);
+        })
+        .catch(err => {
+          console.error('Error updating after new messages:', err);
+        });
+      });
+    }
+
+    // Cleanup: unsubscribe when component unmounts or chat changes
+    return () => {
+      if (selectedChat) {
+        messageService.unsubscribeFromChat(selectedChat);
+      }
+    };
+  }, [selectedChat]);
+
+  // Scroll to bottom when messages change
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [chatMessages]);
+
+  // Set the first chat as selected by default
+  useEffect(() => {
+    if (chats.length > 0 && !selectedChat && !loadingChats) {
       setSelectedChat(chats[0].id);
     }
-  }, [user, loading, router, chats, selectedChat]);
+  }, [chats, selectedChat, loadingChats]);
+
+  // Cleanup polling on unmount
+  useEffect(() => {
+    return () => {
+      messageService.unsubscribeFromAll();
+    };
+  }, []);
+
+  // Send message
+  const sendMessage = async () => {
+    if (!message.trim() || !selectedChat || !user) return;
+    
+    try {
+      const response = await fetch('/api/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          chatId: selectedChat,
+          content: message,
+          messageType: 'text'
+        }),
+      });
+      
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data.error || 'Failed to send message');
+      }
+      
+      const data = await response.json();
+      
+      // Add the new message to the chat
+      setChatMessages(prev => [...prev, data.message]);
+      
+      // Clear the input field
+      setMessage('');
+      
+      // Refresh the chat list to show the updated last message
+      refreshChats();
+    } catch (error) {
+      console.error('Error sending message:', error);
+      setError('Failed to send message. Please try again.');
+    }
+  };
+
+  // Handle key press
+  const handleKeyPress = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      sendMessage();
+    }
+  };
 
   // If still loading or no user, show loading state
   if (loading || !user) {
@@ -196,16 +231,68 @@ export default function ChatsPage() {
   // Function to get badge color based on chat type
   const getBadgeColor = (type?: string) => {
     switch (type) {
-      case 'demo': return 'bg-gray-100 text-gray-700';
-      case 'internal': return 'bg-green-50 text-green-600';
-      case 'content': return 'bg-blue-50 text-blue-600';
-      case 'signup': return 'bg-green-50 text-green-600';
+      case 'Demo': return 'bg-gray-100 text-gray-700';
+      case 'Internal': return 'bg-green-50 text-green-600';
+      case 'Content': return 'bg-blue-50 text-blue-600';
+      case 'Signup': return 'bg-green-50 text-green-600';
       default: return 'bg-gray-100 text-gray-700';
     }
   };
 
+  // Function to format date for display
+  const formatDate = (dateString: string) => {
+    const date = new Date(dateString);
+    const now = new Date();
+    const yesterday = new Date(now);
+    yesterday.setDate(yesterday.getDate() - 1);
+    
+    if (date.toDateString() === now.toDateString()) {
+      return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+    } else if (date.toDateString() === yesterday.toDateString()) {
+      return 'Yesterday';
+    } else {
+      return date.toLocaleDateString('en-US', {
+        day: '2-digit',
+        month: 'short',
+        year: '2-digit'
+      });
+    }
+  };
+
+  // Group messages by date
+  const groupMessagesByDate = () => {
+    const groups: { [date: string]: Message[] } = {};
+    
+    chatMessages.forEach(msg => {
+      if (!groups[msg.date]) {
+        groups[msg.date] = [];
+      }
+      groups[msg.date].push(msg);
+    });
+    
+    return groups;
+  };
+
+  const messageGroups = groupMessagesByDate();
+
+  // Handle new chat creation
+  const handleChatCreated = (chatId: string) => {
+    // Refresh the chat list
+    refreshChats();
+    
+    // Select the new chat
+    setSelectedChat(chatId);
+  };
+
   return (
     <div className="flex h-screen">
+      {/* New Chat Modal */}
+      <NewChatModal 
+        isOpen={newChatModalOpen} 
+        onClose={() => setNewChatModalOpen(false)} 
+        onChatCreated={handleChatCreated}
+      />
+      
       {/* Left sidebar with navigation icons */}
       <div className="w-16 bg-white border-r flex flex-col items-center py-4">
         <div className="w-10 h-10 rounded-full bg-green-600 flex items-center justify-center text-white mb-8">
@@ -217,7 +304,9 @@ export default function ChatsPage() {
           </button>
           <button className="p-3 text-green-600 hover:text-green-700 relative">
             <FaComments size={20} />
-            <span className="absolute -top-1 -right-1 bg-green-600 text-white text-xs w-5 h-5 rounded-full flex items-center justify-center">3</span>
+            <span className="absolute -top-1 -right-1 bg-green-600 text-white text-xs w-5 h-5 rounded-full flex items-center justify-center">
+              {chats.reduce((acc, chat) => acc + (chat.unread || 0), 0)}
+            </span>
           </button>
           <button className="p-3 text-gray-400 hover:text-gray-600">
             <FaChartLine size={20} />
@@ -229,7 +318,7 @@ export default function ChatsPage() {
             <FaUsers size={20} />
           </button>
         </div>
-        <button className="p-3 text-gray-400 hover:text-gray-600 mt-auto">
+        <button className="p-3 text-gray-400 hover:text-gray-600 mt-auto" onClick={logout}>
           <FaCog size={20} />
         </button>
       </div>
@@ -242,8 +331,14 @@ export default function ChatsPage() {
             <h1 className="font-medium text-sm text-gray-600">CHATS</h1>
           </div>
           <div className="flex space-x-3">
-            <button className="text-gray-500 hover:text-gray-700">
+            <button className="text-gray-500 hover:text-gray-700" onClick={refreshChats}>
               <FaSync />
+            </button>
+            <button 
+              className="text-green-500 hover:text-green-700 font-bold"
+              onClick={() => setNewChatModalOpen(true)}
+            >
+              +
             </button>
             <button className="text-gray-500 hover:text-gray-700">
               <FaQuestion />
@@ -279,46 +374,73 @@ export default function ChatsPage() {
         </div>
 
         {/* Chat list */}
-        <div className="flex-1 overflow-y-auto bg-white">
-          {chats.map((chat) => (
-            <div 
-              key={chat.id}
-              className={`flex p-3 border-b cursor-pointer hover:bg-gray-50 ${selectedChat === chat.id ? 'bg-gray-100' : ''}`}
-              onClick={() => setSelectedChat(chat.id)}
+        <div className="flex-1 overflow-y-auto bg-white relative">
+          {/* Floating new chat button */}
+          <div className="absolute bottom-4 right-4 z-10">
+            <button
+              onClick={() => setNewChatModalOpen(true)}
+              className="w-12 h-12 rounded-full bg-green-500 text-white flex items-center justify-center shadow-lg hover:bg-green-600 transition-colors"
             >
-              <div className="w-10 h-10 rounded-full bg-gray-300 flex-shrink-0 flex items-center justify-center text-gray-600 relative mr-3">
-                {chat.name.charAt(0).toUpperCase()}
-                {chat.status === 'online' && (
-                  <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 rounded-full border-2 border-white"></div>
-                )}
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex justify-between items-center">
-                  <h3 className="font-medium text-gray-900 text-sm truncate">{chat.name}</h3>
-                  <span className="text-xs text-gray-500 whitespace-nowrap">{chat.date}</span>
-                </div>
-                <p className="text-xs text-gray-500 truncate">
-                  {chat.lastMessagePrefix && <span className="font-medium">{chat.lastMessagePrefix} </span>}
-                  {chat.lastMessage}
-                </p>
-                <div className="flex mt-1 items-center">
-                  <span className="text-xs text-gray-400 mr-2 whitespace-nowrap">
-                    {chat.phoneNumber}
-                  </span>
-                  {chat.type && (
-                    <span className={`text-xs px-2 py-0.5 rounded ${getBadgeColor(chat.type)}`}>
-                      {chat.type}
-                    </span>
-                  )}
-                  {chat.unread && (
-                    <span className="ml-auto inline-flex items-center justify-center px-2 py-0.5 text-xs font-medium bg-green-100 text-green-700 rounded-full">
-                      +{chat.unread}
-                    </span>
-                  )}
-                </div>
-              </div>
+              <span className="text-2xl font-bold">+</span>
+            </button>
+          </div>
+          
+          {loadingChats ? (
+            <div className="flex justify-center items-center h-32">
+              <div className="animate-pulse text-gray-400">Loading chats...</div>
             </div>
-          ))}
+          ) : chats.length === 0 ? (
+            <div className="flex justify-center items-center h-32">
+              <div className="text-gray-400">No chats found</div>
+            </div>
+          ) : (
+            chats.map((chat) => (
+              <div 
+                key={chat.id}
+                className={`flex p-3 border-b cursor-pointer hover:bg-gray-50 ${selectedChat === chat.id ? 'bg-gray-100' : ''}`}
+                onClick={() => setSelectedChat(chat.id)}
+              >
+                <div className="w-10 h-10 rounded-full bg-gray-300 flex-shrink-0 flex items-center justify-center text-gray-600 relative mr-3">
+                  {(chat.name || 'Unknown').charAt(0).toUpperCase()}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex justify-between items-center">
+                    <h3 className="font-medium text-gray-900 text-sm truncate">{chat.name || chat.participants?.[0]?.full_name || 'Unknown Chat'}</h3>
+                    <span className="text-xs text-gray-500 whitespace-nowrap">
+                      {chat.lastMessage ? formatDate(chat.lastMessage.created_at) : formatDate(chat.created_at)}
+                    </span>
+                  </div>
+                  <p className="text-xs text-gray-500 truncate">
+                    {chat.lastMessage ? (
+                      <>
+                        {chat.lastMessage.sender_id !== user.id && (
+                          <span className="font-medium">{chat.lastMessage.sender_name}: </span>
+                        )}
+                        {chat.lastMessage.content}
+                      </>
+                    ) : (
+                      <span className="italic text-gray-400">No messages yet</span>
+                    )}
+                  </p>
+                  <div className="flex mt-1 items-center">
+                    <span className="text-xs text-gray-400 mr-2 whitespace-nowrap">
+                      {chat.participants?.filter(p => p.id !== user.id)[0]?.phone || ''}
+                    </span>
+                    {chat.chat_type && (
+                      <span className={`text-xs px-2 py-0.5 rounded ${getBadgeColor(chat.chat_type)}`}>
+                        {chat.chat_type.toLowerCase()}
+                      </span>
+                    )}
+                    {chat.unread > 0 && (
+                      <span className="ml-auto inline-flex items-center justify-center px-2 py-0.5 text-xs font-medium bg-green-100 text-green-700 rounded-full">
+                        +{chat.unread}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ))
+          )}
         </div>
       </div>
 
@@ -329,25 +451,47 @@ export default function ChatsPage() {
           <>
             <div className="p-3 border-b flex justify-between items-center bg-white">
               <div className="flex items-center">
-                <div className="w-8 h-8 rounded-full bg-gray-300 flex items-center justify-center text-gray-600 mr-3">
-                  {chats.find(c => c.id === selectedChat)?.name.charAt(0).toUpperCase()}
-                </div>
+                {loadingMessages ? (
+                  <div className="animate-pulse w-8 h-8 rounded-full bg-gray-200 mr-3"></div>
+                ) : (
+                  <div className="w-8 h-8 rounded-full bg-gray-300 flex items-center justify-center text-gray-600 mr-3">
+                    {(chats.find(c => c.id === selectedChat)?.name || 'U').charAt(0).toUpperCase()}
+                  </div>
+                )}
                 <div>
-                  <h2 className="font-medium text-sm">{chats.find(c => c.id === selectedChat)?.name}</h2>
-                  <p className="text-xs text-gray-500 flex items-center">
-                    {chats.find(c => c.id === selectedChat)?.phoneNumber}
-                    <span className="mx-1">|</span>
-                    {chats.find(c => c.id === selectedChat)?.type}
-                  </p>
+                  {loadingMessages ? (
+                    <div className="animate-pulse h-4 w-24 bg-gray-200 rounded mb-1"></div>
+                  ) : (
+                    <h2 className="font-medium text-sm">
+                      {chats.find(c => c.id === selectedChat)?.name || 
+                       chats.find(c => c.id === selectedChat)?.participants?.filter(p => p.id !== user.id)[0]?.full_name || 
+                       'Unknown Chat'}
+                    </h2>
+                  )}
+                  {loadingMessages ? (
+                    <div className="animate-pulse h-3 w-32 bg-gray-200 rounded"></div>
+                  ) : (
+                    <p className="text-xs text-gray-500 flex items-center">
+                      {chats.find(c => c.id === selectedChat)?.participants?.filter(p => p.id !== user.id)[0]?.phone || ''}
+                                             <span className="mx-1">|</span>
+                       {chats.find(c => c.id === selectedChat)?.chat_type?.toLowerCase() || 'unknown'}
+                    </p>
+                  )}
                 </div>
               </div>
               <div className="flex space-x-3">
                 <div className="flex -space-x-2">
                   {/* Profile pictures of participants */}
-                  <div className="w-7 h-7 rounded-full bg-gray-300 border-2 border-white"></div>
-                  <div className="w-7 h-7 rounded-full bg-gray-400 border-2 border-white"></div>
-                  <div className="w-7 h-7 rounded-full bg-gray-500 border-2 border-white"></div>
-                  <div className="w-7 h-7 rounded-full bg-gray-200 border-2 border-white flex items-center justify-center text-xs">+3</div>
+                  {chats.find(c => c.id === selectedChat)?.participants?.slice(0, 3).map((participant, index) => (
+                    <div key={participant.id} className={`w-7 h-7 rounded-full bg-gray-${300 + (index * 50)} border-2 border-white flex items-center justify-center text-xs`}>
+                      {participant.full_name.charAt(0).toUpperCase()}
+                    </div>
+                  ))}
+                  {(chats.find(c => c.id === selectedChat)?.participants?.length || 0) > 3 && (
+                    <div className="w-7 h-7 rounded-full bg-gray-200 border-2 border-white flex items-center justify-center text-xs">
+                      +{(chats.find(c => c.id === selectedChat)?.participants?.length || 0) - 3}
+                    </div>
+                  )}
                 </div>
                 <button className="p-2 rounded-full hover:bg-gray-100 text-gray-600">
                   <FaPhone size={18} />
@@ -362,101 +506,89 @@ export default function ChatsPage() {
             </div>
 
             {/* Chat messages */}
-            <div className="flex-1 p-4 overflow-y-auto bg-gray-50">
-              {/* Date marker */}
-              <div className="flex justify-center mb-4">
-                <span className="px-3 py-1 bg-gray-200 rounded-full text-xs text-gray-600">
-                  22-01-2025
-                </span>
+            <div className="flex-1 p-4 overflow-y-auto bg-gray-50 relative">
+              {/* Refresh messages button */}
+              <div className="absolute top-2 right-2 z-10">
+                <button
+                  onClick={() => {
+                    if (selectedChat) {
+                      setLoadingMessages(true);
+                      fetch(`/api/messages?chatId=${selectedChat}`)
+                        .then(res => res.json())
+                        .then(data => {
+                          setChatMessages(data.messages || []);
+                          setLoadingMessages(false);
+                        })
+                        .catch(err => {
+                          console.error('Error refreshing messages:', err);
+                          setLoadingMessages(false);
+                        });
+                    }
+                  }}
+                  className="p-2 rounded-full bg-white text-gray-500 hover:text-gray-700 shadow-md"
+                  title="Refresh messages"
+                >
+                  <FaSync className={loadingMessages ? "animate-spin" : ""} />
+                </button>
               </div>
-
-              {/* Incoming message */}
-              <div className="flex items-start mb-3">
-                <div className="flex-shrink-0 w-8 h-8 rounded-full bg-gray-300 flex items-center justify-center text-gray-600">
-                  R
+              
+              {loadingMessages ? (
+                <div className="flex justify-center items-center h-full">
+                  <div className="animate-pulse text-gray-400">Loading messages...</div>
                 </div>
-                <div className="ml-2 max-w-md">
-                  <div className="text-xs text-gray-500 mb-1">Roshniag Airtel <span className="text-gray-400">+91 63846 47925</span></div>
-                  <div className="bg-white p-3 rounded-lg">
-                    <p className="text-gray-800">Hello, South Euna!</p>
-                    <div className="text-xs text-gray-500 text-right mt-1">08:01</div>
-                  </div>
+              ) : chatMessages.length === 0 ? (
+                <div className="flex justify-center items-center h-full">
+                  <div className="text-gray-400">No messages yet</div>
                 </div>
-              </div>
-
-              {/* Date marker */}
-              <div className="flex justify-center my-4">
-                <span className="px-3 py-1 bg-gray-200 rounded-full text-xs text-gray-600">
-                  23-01-2025
-                </span>
-              </div>
-
-              {/* Incoming message */}
-              <div className="mb-3">
-                <div className="ml-10 max-w-md">
-                  <div className="bg-white p-3 rounded-lg">
-                    <p className="text-gray-800">CDERT</p>
-                    <div className="text-xs text-gray-500 text-right mt-1">09:49</div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Outgoing message */}
-              <div className="flex justify-end mb-3">
-                <div className="max-w-md">
-                  <div className="flex justify-end">
-                    <div className="text-xs text-gray-500 mb-1">Periskope <span className="text-gray-400">+91 99713 44098</span></div>
-                  </div>
-                  <div className="bg-green-50 p-3 rounded-lg">
-                    <p className="text-gray-800">hello</p>
-                    <div className="flex justify-end items-center mt-1">
-                      <span className="text-xs text-gray-500 mr-1">12:07</span>
-                      <span className="text-green-500">
-                        <FaCheck className="inline" />
-                        <FaCheck className="inline -ml-1" />
+              ) : (
+                Object.entries(messageGroups).map(([date, messages]) => (
+                  <div key={date}>
+                    {/* Date marker */}
+                    <div className="flex justify-center mb-4">
+                      <span className="px-3 py-1 bg-gray-200 rounded-full text-xs text-gray-600">
+                        {date}
                       </span>
                     </div>
-                  </div>
-                </div>
-              </div>
 
-              {/* Another outgoing message */}
-              <div className="flex justify-end mb-3">
-                <div className="max-w-md">
-                  <div className="bg-green-50 p-3 rounded-lg">
-                    <p className="text-gray-800">test el centro</p>
-                    <div className="flex justify-between items-center mt-1">
-                      <span className="text-xs text-gray-400">chang@neimoidia.dev</span>
-                      <div className="flex items-center">
-                        <span className="text-xs text-gray-500 mr-1">09:49</span>
-                        <span className="text-green-500">
-                          <FaCheck className="inline" />
-                          <FaCheck className="inline -ml-1" />
-                        </span>
+                    {/* Messages for this date */}
+                    {messages.map((msg, index) => (
+                      <div key={msg.id} className={`mb-3 ${msg.isSent ? 'flex justify-end' : 'flex items-start'}`}>
+                        {!msg.isSent && (
+                          <div className="flex-shrink-0 w-8 h-8 rounded-full bg-gray-300 flex items-center justify-center text-gray-600 mr-2">
+                            {msg.sender.charAt(0).toUpperCase()}
+                          </div>
+                        )}
+                        <div className={`max-w-md ${msg.isSent ? '' : 'ml-2'}`}>
+                          {/* Show sender info for incoming messages or for the first message in a sequence */}
+                          {(!msg.isSent || (index > 0 && messages[index - 1].isSent !== msg.isSent)) && (
+                            <div className={`text-xs text-gray-500 mb-1 ${msg.isSent ? 'flex justify-end' : ''}`}>
+                              {msg.sender} {msg.phoneNumber && <span className="text-gray-400 ml-1">{msg.phoneNumber}</span>}
+                            </div>
+                          )}
+                          <div className={`${msg.isSent ? 'bg-green-50' : 'bg-white'} p-3 rounded-lg`}>
+                            <p className="text-gray-800">{msg.text}</p>
+                            <div className={`${msg.isSent ? 'flex justify-between' : ''} items-center mt-1`}>
+                              {msg.email && msg.isSent && (
+                                <span className="text-xs text-gray-400">{msg.email}</span>
+                              )}
+                              <div className={`flex items-center ${!msg.isSent ? 'justify-end' : ''}`}>
+                                <span className="text-xs text-gray-500 mr-1">{msg.time}</span>
+                                {msg.isSent && (
+                                  <span className="text-green-500">
+                                    <FaCheck className="inline" />
+                                    {msg.isRead && <FaCheck className="inline -ml-1" />}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
                       </div>
-                    </div>
+                    ))}
                   </div>
-                </div>
-              </div>
-
-              {/* Another outgoing message */}
-              <div className="flex justify-end mb-3">
-                <div className="max-w-md">
-                  <div className="bg-green-50 p-3 rounded-lg">
-                    <p className="text-gray-800">testing</p>
-                    <div className="flex justify-between items-center mt-1">
-                      <span className="text-xs text-gray-400">chang@neimoidia.dev</span>
-                      <div className="flex items-center">
-                        <span className="text-xs text-gray-500 mr-1">09:49</span>
-                        <span className="text-green-500">
-                          <FaCheck className="inline" />
-                          <FaCheck className="inline -ml-1" />
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
+                ))
+              )}
+              <div ref={messagesEndRef} />
             </div>
 
             {/* Message tabs */}
@@ -484,11 +616,16 @@ export default function ChatsPage() {
                 placeholder="Message..."
                 value={message}
                 onChange={(e) => setMessage(e.target.value)}
+                onKeyPress={handleKeyPress}
               />
               <button className="p-2 text-gray-600 hover:text-gray-900">
                 <FaMicrophone className="text-xl" />
               </button>
-              <button className="w-8 h-8 bg-green-600 rounded-full flex items-center justify-center text-white hover:bg-green-700">
+              <button 
+                className="w-8 h-8 bg-green-600 rounded-full flex items-center justify-center text-white hover:bg-green-700"
+                onClick={sendMessage}
+                disabled={!message.trim()}
+              >
                 <FaPaperPlane className="text-sm" />
               </button>
             </div>
