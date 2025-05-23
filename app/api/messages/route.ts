@@ -90,7 +90,7 @@ export async function GET(request: NextRequest) {
         { status: 500 }
       );
     }
-
+    
     // Parse messages to a typed format for easier usage
     const typedMessages = messages as SafeAny[];
     
@@ -187,30 +187,30 @@ export async function GET(request: NextRequest) {
       const isSent = msg.sender_id === userId;
       
       return {
-        id: msg.id,
-        text: msg.content,
-        time: new Date(msg.created_at).toLocaleTimeString('en-US', { 
-          hour: '2-digit', 
-          minute: '2-digit',
-          hour12: true
-        }),
-        sender: msg.users?.full_name || 'Unknown',
-        sender_id: msg.sender_id,
-        phoneNumber: msg.users?.phone,
-        email: msg.users?.email,
+      id: msg.id,
+      text: msg.content,
+      time: new Date(msg.created_at).toLocaleTimeString('en-US', { 
+        hour: '2-digit', 
+        minute: '2-digit',
+        hour12: true
+      }),
+      sender: msg.users?.full_name || 'Unknown',
+      sender_id: msg.sender_id,
+      phoneNumber: msg.users?.phone,
+      email: msg.users?.email,
         isSent: isSent,
-        date: new Date(msg.created_at).toLocaleDateString('en-US', {
-          day: '2-digit',
-          month: '2-digit',
-          year: 'numeric'
-        }),
+      date: new Date(msg.created_at).toLocaleDateString('en-US', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric'
+      }),
         isDelivered: true, // Always true since we're displaying one tick for pending
         // For messages sent by current user, check if any recipient has read it
         // For messages received by current user, check our own read status
         isRead: isSent ? readReceiptMap.has(msg.id) : (status?.status === 'read'),
-        message_type: msg.message_type,
-        is_forwarded: msg.is_forwarded,
-        reply_to_message_id: msg.reply_to_message_id
+      message_type: msg.message_type,
+      is_forwarded: msg.is_forwarded,
+      reply_to_message_id: msg.reply_to_message_id
       };
     });
     
