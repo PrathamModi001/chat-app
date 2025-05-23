@@ -15,7 +15,11 @@ export async function sendPasswordSetupEmail(
   toEmail: string, 
   token: string
 ) {
-  const resetUrl = `${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/auth/set-password?email=${encodeURIComponent(toEmail)}&token=${token}`;
+  // Use NEXT_PUBLIC_APP_URL if set, otherwise use VERCEL_URL for production, fallback to localhost for development
+  const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 
+                  (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000');
+  
+  const resetUrl = `${baseUrl}/auth/set-password?email=${encodeURIComponent(toEmail)}&token=${token}`;
   
   const mailOptions = {
     from: 'prathammodi001@gmail.com',

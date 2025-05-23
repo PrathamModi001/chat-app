@@ -18,11 +18,11 @@ export async function POST(request: NextRequest) {
     // Create Supabase client
     const supabase = await createClient();
 
-    // ONLY check if user exists in our custom users table
+    // ONLY check if user exists in our custom users table by email
     const { data: existingUser } = await supabase
       .from('users')
       .select('id, email')
-      .eq('id', email as any)
+      .eq('email', email)
       .maybeSingle();
 
     if (existingUser) {
@@ -40,9 +40,7 @@ export async function POST(request: NextRequest) {
     const tokenExpiry = new Date();
     tokenExpiry.setHours(tokenExpiry.getHours() + 24); // Token valid for 24 hours
 
-    let userId = null;
-
-    // Try to create user with admin API - might fail if user exists in Auth but not in our table
+    // Create user with admin API
     const { data, error } = await supabase.auth.admin.createUser({
       email,
       password: tempPassword,
@@ -56,108 +54,31 @@ export async function POST(request: NextRequest) {
     });
 
     if (error) {
-      // Check if error is because user already exists in Auth
-      if (error.message?.includes('already exists')) {
-        // Try to find the user in Supabase Auth by email - without filter
-        const { data: existingAuthUser } = await supabase.auth.admin.listUsers();
-        
-        // Find the user by email manually
-        const authUser = existingAuthUser?.users?.find(u => u.email === email);
-
-        // If we found the user in Auth but not in our users table
-        if (authUser) {
-          userId = authUser.id;
-          
-          // Update the existing auth user with new metadata and token
-          const { error: updateError } = await supabase.auth.admin.updateUserById(
-            userId,
-            {
-              user_metadata: {
-                full_name: name,
-                phone,
-                reset_token: token,
-                reset_token_expires: tokenExpiry.toISOString()
-              }
-            }
-          );
-
-          if (updateError) {
-            console.error('Failed to update existing auth user:', updateError);
-            return NextResponse.json(
-              { error: 'Failed to update user' },
-              { status: 500 }
-            );
-          }
-        } else {
-          console.error('Supabase signup error:', error);
-          return NextResponse.json(
-            { error: 'Failed to create user account' },
-            { status: 500 }
-          );
-        }
-      } else {
-        console.error('Supabase signup error:', error);
-        return NextResponse.json(
-          { error: error.message || 'Failed to create user' },
-          { status: 500 }
-        );
-      }
-    } else {
-      // New user was created successfully
-      userId = data.user.id;
+      console.error('Supabase signup error:', error);
+      return NextResponse.json(
+        { error: error.message || 'Failed to create user' },
+        { status: 500 }
+      );
     }
 
-    // If we have a userId, create or update the user in our custom table
-    if (userId) {
-      // First check if a record with this ID already exists
-      const { data: existingUserRecord } = await supabase
-        .from('users')
-        .select('id')
-        .eq('id', userId as any)
-        .maybeSingle();
+    const userId = data.user.id;
 
-      if (existingUserRecord) {
-        // Update existing record
-        const { error: updateError } = await supabase
-          .from('users')
-          .update({
-            email,
-            full_name: name,
-            phone
-          } as any)
-          .eq('id', userId as any);
+    // Insert user record in our custom table
+    const { error: insertError } = await supabase.from('users').insert({
+      id: userId,
+      email,
+      full_name: name,
+      phone,
+    } as any);
 
-        if (updateError) {
-          console.error('User update error:', updateError);
-          return NextResponse.json(
-            { error: updateError.message || 'Failed to update user profile' },
-            { status: 500 }
-          );
-        }
-      } else {
-        // Insert new record
-        const { error: insertError } = await supabase.from('users').insert({
-          id: userId,
-          email,
-          full_name: name,
-          phone,
-        } as any);
-
-        if (insertError) {
-          console.error('User insert error:', insertError);
-          
-          // Clean up the auth user if we failed to create the profile
-          await supabase.auth.admin.deleteUser(userId);
-          
-          return NextResponse.json(
-            { error: insertError.message || 'Failed to create user profile' },
-            { status: 500 }
-          );
-        }
-      }
-    } else {
+    if (insertError) {
+      console.error('User insert error:', insertError);
+      
+      // Clean up the auth user if we failed to create the profile
+      await supabase.auth.admin.deleteUser(userId);
+      
       return NextResponse.json(
-        { error: 'Failed to create or identify user' },
+        { error: insertError.message || 'Failed to create user profile' },
         { status: 500 }
       );
     }
