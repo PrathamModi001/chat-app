@@ -11,7 +11,7 @@ export const metadata: Metadata = {
   title: "Periskope Chat",
   description: "A simple chat application with authentication and messaging features",
   icons: {
-    icon: '/favicon.png',
+    icon: '/download.png',
   },
 };
 
