@@ -2,10 +2,11 @@ import { createClient } from '@supabase/supabase-js';
 import { NextResponse } from 'next/server';
 import { randomUUID } from 'crypto';
 
-// Create Supabase client with server-side options
+// Create Supabase client with server-side options - configured only on the server
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 
+// This entire function runs only on the server
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const chatId = searchParams.get('chatId');
@@ -13,9 +14,15 @@ export async function GET(request: Request) {
   // Create a unique session ID for this connection to avoid channel name conflicts
   const sessionId = randomUUID();
   
-  // Create a fresh Supabase client for each connection
+  // Create a fresh Supabase client for each connection - SERVER SIDE ONLY
   const supabase = createClient(supabaseUrl, supabaseAnonKey, {
-    auth: { persistSession: false }
+    auth: { persistSession: false },
+    // Safe to use realtime on the server
+    realtime: {
+      params: {
+        eventsPerSecond: 10
+      }
+    }
   });
   
   // Set headers for SSE
@@ -159,25 +166,18 @@ export async function GET(request: Request) {
           }
         });
       } catch (error) {
-        console.error('Error in subscription setup:', error);
-        if (connected) {
-          safeSend(`event: error\ndata: ${JSON.stringify({ message: 'Subscription setup failed' })}\n\n`);
-        }
-        
-        // Clean up if we fail during setup
-        if (pingInterval) {
-          clearInterval(pingInterval);
-        }
-        connected = false;
+        console.error('Error setting up SSE connection:', error);
+        controller.close();
       }
     }
   });
   
+  // Return the stream as SSE
   return new Response(stream, {
     headers: {
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache, no-transform',
-      'Connection': 'keep-alive'
-    }
+      'Connection': 'keep-alive',
+    },
   });
 } 

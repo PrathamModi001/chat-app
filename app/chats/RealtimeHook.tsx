@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '@/lib/context/AuthContext';
 
-// A custom hook for handling realtime updates safely in Next.js
+// A custom hook for handling realtime updates safely in Next.js using server-sent events
 export function useRealtimeSubscriptions(selectedChatId: string | null) {
   const { user } = useAuth();
   const [messages, setMessages] = useState<any[]>([]);
@@ -16,6 +16,12 @@ export function useRealtimeSubscriptions(selectedChatId: string | null) {
 
     // Function to set up chat list EventSource (without chat ID)
     const setupChatListEventSource = () => {
+      // Close any existing connection
+      if (chatEventSource) {
+        chatEventSource.close();
+      }
+      
+      // Open a new connection to the server
       chatEventSource = new EventSource('/api/subscribe');
       
       // Listen for chat updates
@@ -28,31 +34,42 @@ export function useRealtimeSubscriptions(selectedChatId: string | null) {
         setChatsUpdated(prev => !prev);
       });
       
-      // Handle errors
-      chatEventSource.onerror = (error) => {
-        console.error('Chat EventSource failed:', error);
-        if (chatEventSource) {
-          chatEventSource.close();
-          // Try to reconnect after a delay
+      // Handle connection open
+      chatEventSource.addEventListener('open', () => {
+        console.log('Chat EventSource connection established');
+      });
+      
+      // Handle errors and connection issues
+      chatEventSource.addEventListener('error', (event) => {
+        console.error('Chat EventSource failed:', event);
+        if (chatEventSource && chatEventSource.readyState === EventSource.CLOSED) {
+          // Try to reconnect after a delay if the connection is closed
           setTimeout(setupChatListEventSource, 5000);
         }
-      };
+      });
     };
 
     // Function to set up message EventSource (with chat ID)
     const setupMessageEventSource = (chatId: string) => {
+      // Close any existing connection
       if (messagesEventSource) {
         messagesEventSource.close();
       }
       
+      // Open a new connection to the server with chat ID parameter
       messagesEventSource = new EventSource(`/api/subscribe?chatId=${chatId}`);
+      
+      // Handle connection open
+      messagesEventSource.addEventListener('open', () => {
+        console.log(`Message EventSource connection established for chat ${chatId}`);
+      });
       
       // Listen for new messages
       messagesEventSource.addEventListener('new_message', async (event: MessageEvent) => {
-        const payload = JSON.parse(event.data);
-        if (!payload.new?.id) return;
-        
         try {
+          const payload = JSON.parse(event.data);
+          if (!payload.new?.id) return;
+          
           // Fetch the complete message from the API
           const response = await fetch(`/api/messages/${payload.new.id}`);
           if (!response.ok) throw new Error('Failed to fetch message details');
@@ -62,31 +79,34 @@ export function useRealtimeSubscriptions(selectedChatId: string | null) {
             setMessages(prev => [...prev, data.message]);
           }
         } catch (error) {
-          console.error('Error fetching message details:', error);
+          console.error('Error processing new message event:', error);
         }
       });
       
       // Listen for message read status updates
       messagesEventSource.addEventListener('message_read', (event: MessageEvent) => {
-        const payload = JSON.parse(event.data);
-        if (!payload.new?.id) return;
-        
-        setMessages(prev => 
-          prev.map(msg => 
-            msg.id === payload.new.id ? { ...msg, isRead: true } : msg
-          )
-        );
+        try {
+          const payload = JSON.parse(event.data);
+          if (!payload.new?.id) return;
+          
+          setMessages(prev => 
+            prev.map(msg => 
+              msg.id === payload.new.id ? { ...msg, isRead: true } : msg
+            )
+          );
+        } catch (error) {
+          console.error('Error processing message read event:', error);
+        }
       });
       
-      // Handle errors
-      messagesEventSource.onerror = (error) => {
-        console.error('Message EventSource failed:', error);
-        if (messagesEventSource) {
-          messagesEventSource.close();
-          // Try to reconnect after a delay
+      // Handle errors and connection issues
+      messagesEventSource.addEventListener('error', (event) => {
+        console.error('Message EventSource failed:', event);
+        if (messagesEventSource && messagesEventSource.readyState === EventSource.CLOSED) {
+          // Try to reconnect after a delay if the connection is closed
           setTimeout(() => setupMessageEventSource(chatId), 5000);
         }
-      };
+      });
     };
 
     // Set up chat list subscription first

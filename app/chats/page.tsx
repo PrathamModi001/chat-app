@@ -17,6 +17,7 @@ import NewChatModal from '@/components/NewChatModal';
 import ManageLabelsModal from '@/components/ManageLabelsModal';
 import { Message, Chat, User, Label } from '@/types/chat';
 import { useRealtimeSubscriptions } from './RealtimeHook';
+import { createBrowserClient } from '@/lib/supabase/browser-client';
 
 export default function ChatsPage() {
   const { user, loading, logout } = useAuth();
@@ -305,9 +306,9 @@ export default function ChatsPage() {
             );
           } else {
             return [...prevMessages, messageWithChatId];
-          }
-        });
-      }
+        }
+      });
+    }
     });
   }, [realtimeMessages, selectedChat, user?.id, indexedDBService, isSearchOpen, messageSearchQuery]);
 
@@ -323,7 +324,7 @@ export default function ChatsPage() {
         // First try to get messages from IndexedDB
         if (indexedDBService) {
           try {
-    if (selectedChat) {
+      if (selectedChat) {
               const cachedMessages = await indexedDBService.getMessagesByChatId(selectedChat);
               if (cachedMessages && cachedMessages.length > 0) {
                 console.log(`Retrieved ${cachedMessages.length} messages from IndexedDB for chat ${selectedChat}`);
@@ -791,8 +792,8 @@ export default function ChatsPage() {
         {/* Main header - spans full width */}
         <div className="flex items-center justify-between px-4 py-2 bg-white border-b">
           <div className="flex items-center">
-            <span className="text-gray-600">@</span>
-            <span className="ml-1 text-black">chats</span>
+            <FaComments className="text-green-600" size={20} />
+            <span className="ml-2 font-medium text-black">Chats</span>
           </div>
           <div className="flex items-center space-x-5">
             <button className="text-gray-600 hover:text-gray-700" title="Refresh">
