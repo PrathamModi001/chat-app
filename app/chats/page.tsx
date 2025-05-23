@@ -12,58 +12,7 @@ import {
 } from 'react-icons/fa';
 import NewChatModal from '@/components/NewChatModal';
 import ManageLabelsModal from '@/components/ManageLabelsModal';
-
-interface User {
-  id: string;
-  full_name: string;
-  phone?: string;
-  email?: string;
-  profile_image_url?: string;
-}
-
-interface Label {
-  id: string;
-  name: string;
-  color?: string;
-}
-
-interface Message {
-  id: string;
-  text: string;
-  time: string;
-  sender: string;
-  sender_id: string;
-  phoneNumber?: string;
-  email?: string;
-  isSent: boolean;
-  date: string;
-  isDelivered: boolean;
-  isRead: boolean;
-  message_type: string;
-  is_forwarded: boolean;
-  reply_to_message_id?: string;
-}
-
-interface Chat {
-  id: string;
-  name?: string;
-  description?: string;
-  lastMessage?: {
-    id: string;
-    content: string;
-    created_at: string;
-    sender_id: string;
-    sender_name: string;
-    message_type: string;
-    is_forwarded: boolean;
-  };
-  created_at: string;
-  updated_at: string;
-  unread: number;
-  is_group: boolean;
-  participants: User[];
-  labels?: Label[];
-}
+import { Message, Chat, User, Label } from '@/types/chat';
 
 export default function ChatsPage() {
   const { user, loading, logout } = useAuth();
@@ -85,28 +34,89 @@ export default function ChatsPage() {
   const [newChatModalOpen, setNewChatModalOpen] = useState(false);
   const [manageLabelsModalOpen, setManageLabelsModalOpen] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  
+  // Reference to IndexedDB service
+  const [indexedDBService, setIndexedDBService] = useState<any>(null);
 
   // For tracking visible messages and marking them as read
   const [visibleMessages, setVisibleMessages] = useState<Set<string>>(new Set());
   const messageObserverRef = useRef<IntersectionObserver | null>(null);
   const unreadMessageRefs = useRef<{[key: string]: HTMLDivElement | null}>({});
   
+  // Dynamically import IndexedDB service
+  useEffect(() => {
+    // Only import in browser environment
+    const loadIndexedDBService = async () => {
+      // Only attempt import in browser environment
+      if (typeof window !== 'undefined') {
+        try {
+          const module = await import('@/lib/indexedDb');
+          setIndexedDBService(module.indexedDBService);
+          console.log('IndexedDB service loaded');
+        } catch (error: any) {
+          console.error('Failed to load IndexedDB service:', error);
+        }
+      } else {
+        console.log('Skipping IndexedDB initialization in server environment');
+      }
+    };
+    
+    loadIndexedDBService();
+  }, []);
+  
   // Initialize realtime service when user is available
   useEffect(() => {
-    if (!user) return;
+    if (!user || !indexedDBService) return;
     
     // Fetch initial chats
     const fetchInitialChats = async () => {
     try {
       setLoadingChats(true);
+      
+      // First try to get chats from IndexedDB
+      try {
+        const cachedChats = await indexedDBService.getAllChats();
+        if (cachedChats && cachedChats.length > 0) {
+          console.log('Retrieved chats from IndexedDB:', cachedChats);
+          setChats(cachedChats);
+          
+          // Update filtered chats based on search query
+          if (!searchQuery.trim()) {
+            setFilteredChats(cachedChats);
+          } else {
+            const query = searchQuery.toLowerCase();
+            const filtered = cachedChats.filter((chat: Chat) => {
+              if (chat.name?.toLowerCase().includes(query)) return true;
+              if (chat.participants?.some((p: User) => p.full_name.toLowerCase().includes(query))) return true;
+              if (chat.participants?.some((p: User) => p.phone?.includes(query))) return true;
+              if (chat.lastMessage?.content.toLowerCase().includes(query)) return true;
+              return false;
+            });
+            setFilteredChats(filtered);
+          }
+        }
+      } catch (dbError: any) {
+        console.error('Error fetching chats from IndexedDB:', dbError);
+      }
+      
+      // Then fetch from API
       const response = await fetch('/api/chats');
       if (!response.ok) {
         throw new Error('Failed to fetch chats');
       }
       const data = await response.json();
+      
+      // Store chats in IndexedDB
+      try {
+        await indexedDBService.storeChats(data.chats || []);
+        console.log('Chats stored in IndexedDB');
+      } catch (dbError: any) {
+        console.error('Error storing chats in IndexedDB:', dbError);
+      }
+      
       setChats(data.chats || []);
       
-        // Update filtered chats based on search query
+      // Update filtered chats based on search query
       if (!searchQuery.trim()) {
         setFilteredChats(data.chats || []);
       } else {
@@ -175,7 +185,7 @@ export default function ChatsPage() {
     return () => {
       eventSource.close();
     };
-  }, [user, searchQuery]);
+  }, [user, searchQuery, indexedDBService]);
 
   // Filter chats based on search query
   useEffect(() => {
@@ -249,12 +259,30 @@ export default function ChatsPage() {
 
   // When a chat is selected, fetch initial messages and subscribe to realtime updates
   useEffect(() => {
-    if (!selectedChat) return;
+    if (!selectedChat || !indexedDBService) return;
     
     // Fetch initial messages
     const fetchInitialMessages = async () => {
       try {
         setLoadingMessages(true);
+        
+        // First try to get messages from IndexedDB
+        if (indexedDBService) {
+          try {
+            if (selectedChat) {
+              const cachedMessages = await indexedDBService.getMessagesByChatId(selectedChat);
+              if (cachedMessages && cachedMessages.length > 0) {
+                console.log(`Retrieved ${cachedMessages.length} messages from IndexedDB for chat ${selectedChat}`);
+                setChatMessages(cachedMessages);
+                setFilteredMessages(cachedMessages);
+              }
+            }
+          } catch (dbError: any) {
+            console.error('Error fetching messages from IndexedDB:', dbError);
+          }
+        }
+        
+        // Then fetch from API
         const response = await fetch(`/api/messages?chatId=${selectedChat}`);
         
         if (!response.ok) {
@@ -262,8 +290,27 @@ export default function ChatsPage() {
         }
         
         const data = await response.json();
-        setChatMessages(data.messages || []);
-        setFilteredMessages(data.messages || []);
+        
+        // Add chatId property to each message for IndexedDB storage
+        const messagesWithChatId = (data.messages || []).map((msg: any) => ({
+          ...msg,
+          chatId: selectedChat
+        }));
+        
+        // Store messages in IndexedDB
+        if (indexedDBService) {
+          try {
+            if (messagesWithChatId.length > 0) {
+              await indexedDBService.storeMessages(messagesWithChatId);
+              console.log(`Stored ${messagesWithChatId.length} messages in IndexedDB for chat ${selectedChat}`);
+            }
+          } catch (dbError: any) {
+            console.error('Error storing messages in IndexedDB:', dbError);
+          }
+        }
+        
+        setChatMessages(messagesWithChatId);
+        setFilteredMessages(messagesWithChatId);
       } catch (error) {
         console.error('Error fetching messages:', error);
         setError('Failed to load messages. Please try again.');
@@ -298,8 +345,24 @@ export default function ChatsPage() {
             // Update the isSent property based on the current user
             const newMessage = {
               ...data.message,
-              isSent: data.message.sender_id === user?.id
+              isSent: data.message.sender_id === user?.id,
+              chatId: selectedChat // Add chatId for IndexedDB storage
             };
+            
+            // Store the new message in IndexedDB
+            if (indexedDBService) {
+              try {
+                indexedDBService.storeMessage(newMessage)
+                  .then(() => {
+                    console.log(`Stored new message in IndexedDB: ${newMessage.id}`);
+                  })
+                  .catch((dbError: any) => {
+                    console.error('Error storing new message in IndexedDB:', dbError);
+                  });
+              } catch (dbError: any) {
+                console.error('Error storing new message in IndexedDB:', dbError);
+              }
+            }
             
             // Replace any temporary message or add this as a new message
             setChatMessages(prevMessages => {
@@ -345,11 +408,37 @@ export default function ChatsPage() {
       
       if (payload.new && payload.new.id) {
         // Update the read status of this message locally
-        setChatMessages(prevMessages => 
-          prevMessages.map(msg => 
+        setChatMessages(prevMessages => {
+          const updatedMessages = prevMessages.map(msg => 
             msg.id === payload.new.id ? { ...msg, isRead: true } : msg
-          )
-        );
+          );
+          
+          // Update message in IndexedDB
+          if (indexedDBService) {
+            const updatedMessage = updatedMessages.find(msg => msg.id === payload.new.id);
+            if (updatedMessage) {
+              try {
+                // Ensure message has chatId (required for IndexedDB)
+                const messageWithChatId = {
+                  ...updatedMessage,
+                  chatId: selectedChat || updatedMessage.chatId || ''
+                };
+                
+                indexedDBService.storeMessage(messageWithChatId)
+                  .then(() => {
+                    console.log(`Updated message read status in IndexedDB: ${messageWithChatId.id}`);
+                  })
+                  .catch((dbError: any) => {
+                    console.error('Error updating message read status in IndexedDB:', dbError);
+                  });
+              } catch (dbError: any) {
+                console.error('Error updating message read status in IndexedDB:', dbError);
+              }
+            }
+          }
+          
+          return updatedMessages;
+        });
         
         setFilteredMessages(prevMessages => 
           prevMessages.map(msg => 
@@ -375,7 +464,7 @@ export default function ChatsPage() {
     return () => {
       eventSource.close();
     };
-  }, [selectedChat, user?.id]);
+  }, [selectedChat, user?.id, indexedDBService]);
 
   // Scroll to bottom when messages change
   useEffect(() => {
@@ -448,13 +537,34 @@ export default function ChatsPage() {
     if (unreadMessageIds.length === 0) return;
     
     // Mark these messages as read locally first
-    setChatMessages(prevMessages => 
-      prevMessages.map(msg => 
+    setChatMessages(prevMessages => {
+      const updatedMessages = prevMessages.map(msg => 
         unreadMessageIds.includes(msg.id) 
           ? { ...msg, isRead: true } 
           : msg
-      )
-    );
+      );
+      
+      // Update read status in IndexedDB for each updated message
+      if (indexedDBService) {
+        updatedMessages
+          .filter(msg => unreadMessageIds.includes(msg.id))
+          .forEach(msg => {
+            try {
+              indexedDBService.storeMessage(msg)
+                .then(() => {
+                  console.log(`Updated read status in IndexedDB for message: ${msg.id}`);
+                })
+                .catch((dbError: any) => {
+                  console.error('Error updating read status in IndexedDB:', dbError);
+                });
+            } catch (dbError: any) {
+              console.error('Error updating read status in IndexedDB:', dbError);
+            }
+          });
+      }
+      
+      return updatedMessages;
+    });
     
     setFilteredMessages(prevMessages => 
       prevMessages.map(msg => 
@@ -510,12 +620,23 @@ export default function ChatsPage() {
       isDelivered: false,
       isRead: false,
       message_type: 'text',
-      is_forwarded: false
+      is_forwarded: false,
+      chatId: selectedChat // Add chatId for IndexedDB storage
     };
     
     // Add optimistic message to UI immediately
     setChatMessages(prev => [...prev, optimisticMessage]);
     setFilteredMessages(prev => [...prev, optimisticMessage]);
+    
+    // Store optimistic message in IndexedDB
+    if (indexedDBService) {
+      try {
+        await indexedDBService.storeMessage(optimisticMessage);
+        console.log(`Stored optimistic message in IndexedDB: ${optimisticId}`);
+      } catch (dbError: any) {
+        console.error('Error storing optimistic message in IndexedDB:', dbError);
+      }
+    }
     
     try {
       const response = await fetch('/api/messages', {
@@ -535,6 +656,17 @@ export default function ChatsPage() {
         // Remove the optimistic message on error
         setChatMessages(prev => prev.filter(msg => msg.id !== optimisticId));
         setFilteredMessages(prev => prev.filter(msg => msg.id !== optimisticId));
+        
+        // Also remove from IndexedDB
+        if (indexedDBService) {
+          try {
+            await indexedDBService.deleteMessage(optimisticId);
+            console.log(`Removed failed message from IndexedDB: ${optimisticId}`);
+          } catch (dbError: any) {
+            console.error('Error removing failed message from IndexedDB:', dbError);
+          }
+        }
+        
         throw new Error(data.error || 'Failed to send message');
       }
       
@@ -1081,17 +1213,6 @@ export default function ChatsPage() {
                 ))
               )}
               <div ref={messagesEndRef} />
-            </div>
-
-            {/* Message tabs */}
-            <div className="border-t bg-white flex text-xs">
-              <button className="px-4 py-2 text-green-600 border-b-2 border-green-600 font-medium">
-                WhatsApp
-              </button>
-              <button className="px-4 py-2 text-orange-600 flex items-center">
-                Private Note
-                <span className="ml-1 w-4 h-4 bg-orange-100 rounded-full text-xs flex items-center justify-center text-orange-600">3</span>
-              </button>
             </div>
 
             {/* Message input */}
