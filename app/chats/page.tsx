@@ -8,8 +8,11 @@ import {
   FaUser, FaSearch, FaEllipsisV, FaPaperPlane, FaSmile, 
   FaPaperclip, FaMicrophone, FaHome, FaComments, FaChartLine,
   FaFileAlt, FaCog, FaUsers, FaFilter, FaSave, FaSync, FaPhone,
-  FaQuestion, FaCheck, FaTags
+  FaQuestion, FaCheck, FaTags, FaExpandAlt, FaBell, FaStar, 
+  FaListAlt, FaIdCard, FaImage, FaCode, FaUserAlt
 } from 'react-icons/fa';
+import { MdRefresh, MdHelp, MdOutlineOpenInNew, MdDiamond } from 'react-icons/md';
+import { BsThreeDotsVertical } from 'react-icons/bs';
 import NewChatModal from '@/components/NewChatModal';
 import ManageLabelsModal from '@/components/ManageLabelsModal';
 import { Message, Chat, User, Label } from '@/types/chat';
@@ -42,6 +45,27 @@ export default function ChatsPage() {
   const [visibleMessages, setVisibleMessages] = useState<Set<string>>(new Set());
   const messageObserverRef = useRef<IntersectionObserver | null>(null);
   const unreadMessageRefs = useRef<{[key: string]: HTMLDivElement | null}>({});
+
+  // Check URL parameters for direct chat access
+  useEffect(() => {
+    // Only run in browser environment
+    if (typeof window !== 'undefined') {
+      // Check if there's a chatId in the URL query parameters
+      const url = new URL(window.location.href);
+      const chatIdParam = url.searchParams.get('chatId');
+      
+      if (chatIdParam) {
+        setSelectedChat(chatIdParam);
+        
+        // Update browser URL to clean version without showing query params
+        // This preserves the ability to refresh the page and share links
+        window.history.replaceState({}, '', `/chats`);
+      }
+    }
+    
+    // Return empty cleanup function to satisfy EffectCallback type
+    return () => {};
+  }, []);
   
   // Dynamically import IndexedDB service
   useEffect(() => {
@@ -50,7 +74,7 @@ export default function ChatsPage() {
       // Only attempt import in browser environment
       if (typeof window !== 'undefined') {
         try {
-          const module = await import('@/lib/indexedDb');
+          const module = await import('../../lib/indexedDb');
           setIndexedDBService(module.indexedDBService);
           console.log('IndexedDB service loaded');
         } catch (error: any) {
@@ -706,11 +730,11 @@ export default function ChatsPage() {
     } else if (date.toDateString() === yesterday.toDateString()) {
       return 'Yesterday';
     } else {
-      return date.toLocaleDateString('en-US', {
-        day: '2-digit',
-        month: 'short',
-        year: '2-digit'
-      });
+      // Format as DD-MMM-YY (e.g., 28-Feb-25)
+      const day = date.getDate().toString().padStart(2, '0');
+      const month = date.toLocaleString('en-US', { month: 'short' });
+      const year = date.getFullYear().toString().slice(2);
+      return `${day}-${month}-${year}`;
     }
   };
 
@@ -752,9 +776,58 @@ export default function ChatsPage() {
   const messageGroups = groupMessagesByDate();
 
   // Handle new chat creation
-  const handleChatCreated = (chatId: string) => {
-    // Select the new chat - the realtime service will update the chat list
+  const handleChatCreated = (chatId: string, isGroup: boolean = false) => {
+    // Select the new chat
     setSelectedChat(chatId);
+    
+    // Redirect to appropriate URL based on chat type
+    if (isGroup) {
+      router.push(`/groups/${chatId}`);
+    } else {
+      router.push(`/chats/${chatId}`);
+    }
+  };
+
+  const handleChatSelect = (chat: Chat) => {
+    // Simply set the selected chat
+    setSelectedChat(chat.id);
+    
+    // Update the URL without changing the page (for sharing/bookmarking)
+    if (typeof window !== 'undefined') {
+      window.history.pushState({}, '', `/chats/${chat.id}`);
+    }
+  };
+
+  // Handler for when labels are applied to a chat
+  const handleLabelsApplied = async () => {
+    console.log('Labels applied, refreshing chats');
+    try {
+      setLoadingChats(true);
+      const response = await fetch('/api/chats');
+      if (!response.ok) {
+        throw new Error('Failed to fetch updated chats');
+      }
+      const data = await response.json();
+      
+      setChats(data.chats || []);
+      if (!searchQuery.trim()) {
+        setFilteredChats(data.chats || []);
+      } else {
+        const query = searchQuery.toLowerCase();
+        const filtered = (data.chats || []).filter((chat: Chat) => {
+          if (chat.name?.toLowerCase().includes(query)) return true;
+          if (chat.participants?.some((p: User) => p.full_name.toLowerCase().includes(query))) return true;
+          if (chat.participants?.some((p: User) => p.phone?.includes(query))) return true;
+          if (chat.lastMessage?.content.toLowerCase().includes(query)) return true;
+          return false;
+        });
+        setFilteredChats(filtered);
+      }
+    } catch (error) {
+      console.error('Error refreshing chats after label change:', error);
+    } finally {
+      setLoadingChats(false);
+    }
   };
 
   return (
@@ -767,490 +840,582 @@ export default function ChatsPage() {
       />
       
       {/* Left sidebar with navigation icons */}
-      <div className="w-16 bg-white border-r flex flex-col items-center py-4">
-        <div className="w-10 h-10 mb-8">
+      <div className="w-16 bg-white border-r flex flex-col items-center py-5">
+        <div className="w-9 h-9 mb-5">
           <Image 
             src="/download.png" 
             alt="Periskope Logo" 
-            width={40}
-            height={40}
+            width={36}
+            height={36}
             className="rounded-full"
           />
         </div>
-        <div className="flex flex-col space-y-6 items-center flex-1">
-          <button className="p-3 text-black hover:text-gray-800">
-            <FaHome size={20} />
+        <div className="flex flex-col items-center flex-1 w-full space-y-0">
+          <button className="w-full flex justify-center py-4 text-gray-400 hover:text-gray-600">
+            <FaHome size={18} />
           </button>
-          <button className="p-3 text-green-600 hover:text-green-700 relative">
-            <FaComments size={20} />
-            <span className="absolute -top-1 -right-1 bg-green-600 text-white text-xs w-5 h-5 rounded-full flex items-center justify-center">
-              {chats.reduce((acc, chat) => acc + (chat.unread || 0), 0)}
-            </span>
-          </button>
-          <button className="p-3 text-black hover:text-gray-800">
-            <FaChartLine size={20} />
-          </button>
-          <button className="p-3 text-black hover:text-gray-800">
-            <FaFileAlt size={20} />
-          </button>
-          <button className="p-3 text-black hover:text-gray-800">
-            <FaUsers size={20} />
-          </button>
-        </div>
-        <button className="p-3 text-black hover:text-gray-800 mt-auto" onClick={logout}>
-          <FaCog size={20} />
-        </button>
-      </div>
-
-      {/* Chats sidebar */}
-      <div className="w-80 border-r flex flex-col">
-        {/* Header */}
-        <div className="p-3 border-b flex justify-between items-center bg-white">
-          <div className="flex items-center">
-            <h1 className="font-medium text-sm text-gray-600">CHATS</h1>
-          </div>
-          <div className="flex space-x-3">
-            <button className="text-black hover:text-gray-800" onClick={() => setNewChatModalOpen(true)}>
-              +
-            </button>
-            <button className="text-black hover:text-gray-800">
-              <FaQuestion />
-            </button>
-            <div className="flex items-center text-xs text-black">
-              <span className="text-yellow-500 mr-1">●</span>
-              5 / 5 phones
-            </div>
-          </div>
-        </div>
-
-        {/* Filters */}
-        <div className="p-2 border-b flex items-center space-x-2 bg-gray-50 text-xs">
-          <button className="px-3 py-1 rounded-md text-xs border border-green-600 text-green-600 flex items-center">
-            <FaFilter className="mr-1" />
-            <span>Custom filter</span>
-          </button>
-          <button className="px-3 py-1 rounded-md text-xs border border-gray-300 text-gray-600">
-            <FaSave className="mr-1" />
-            Save
-          </button>
-          <button 
-            className="px-3 py-1 rounded-md text-xs border border-gray-300 text-gray-600 flex items-center"
-            onClick={() => setSearchOpen(!searchOpen)}
-          >
-            <FaSearch className="mr-1" />
-            Search
-          </button>
-          <button 
-            className={`px-3 py-1 rounded-md text-xs ${filtered ? 'bg-green-50 text-green-600 border border-green-100' : 'border border-gray-300 text-gray-600'} flex items-center`}
-            onClick={() => setFiltered(!filtered)}
-          >
-            <span>Filtered</span>
-            <FaFilter className={`ml-1 ${filtered ? 'text-green-500' : 'text-gray-500'}`} />
-          </button>
-        </div>
-
-        {/* Search input for chats */}
-        {searchOpen && (
-          <div className="p-2 border-b bg-white">
+          <button className="w-full relative flex justify-center py-4 text-green-600 border-l-[3px] border-green-600">
             <div className="relative">
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search chats..."
-                className="w-full px-3 py-2 pr-10 border rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-green-500"
-              />
-              {searchQuery && (
-                <button 
-                  className="absolute right-2 top-2 text-black hover:text-gray-800"
-                  onClick={() => setSearchQuery('')}
-                >
-                  ×
-                </button>
-              )}
+              <FaComments size={18} />
+              <span className="absolute -top-2 -right-2 bg-green-600 text-white text-[8px] w-4 h-4 rounded-full flex items-center justify-center">
+                {chats.reduce((acc, chat) => acc + (chat.unread || 0), 0)}
+              </span>
             </div>
-          </div>
-        )}
-
-        {/* Chat list */}
-        <div className="flex-1 overflow-y-auto bg-white relative">
-          {/* Floating new chat button */}
-          <div className="absolute bottom-4 right-4 z-10">
-            <button
-              onClick={() => setNewChatModalOpen(true)}
-              className="w-12 h-12 rounded-full bg-green-500 text-white flex items-center justify-center shadow-lg hover:bg-green-600 transition-colors"
-            >
-              <span className="text-2xl font-bold">+</span>
-            </button>
-          </div>
-          
-          {loadingChats ? (
-            <div className="flex justify-center items-center h-32">
-              <div className="animate-pulse text-black">Loading chats...</div>
-            </div>
-          ) : filteredChats.length === 0 ? (
-            <div className="flex justify-center items-center h-32">
-              <div className="text-black">
-                {searchQuery ? 'No matching chats found' : 'No chats found'}
-              </div>
-            </div>
-          ) : (
-            filteredChats.map((chat) => (
-            <div 
-              key={chat.id}
-              className={`flex p-3 border-b cursor-pointer hover:bg-gray-50 ${selectedChat === chat.id ? 'bg-gray-100' : ''}`}
-              onClick={() => setSelectedChat(chat.id)}
-            >
-                <div className="w-10 h-10 rounded-full bg-gray-200 flex-shrink-0 flex items-center justify-center text-gray-600 relative mr-3">
-                  {(chat.name || 'Unknown').charAt(0).toUpperCase()}
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex justify-between items-center">
-                    <h3 className="font-medium text-gray-900 text-sm truncate">{chat.name || chat.participants?.[0]?.full_name || 'Unknown Chat'}</h3>
-                    <span className="text-xs text-black whitespace-nowrap">
-                      {chat.lastMessage ? formatDate(chat.lastMessage.created_at) : formatDate(chat.created_at)}
-                    </span>
-                </div>
-                  <p className="text-xs text-black truncate">
-                    {chat.lastMessage ? (
-                      <>
-                        {chat.lastMessage.sender_id !== user.id && (
-                          <span className="font-medium">{chat.lastMessage.sender_name}: </span>
-                        )}
-                        {chat.lastMessage.content}
-                      </>
-                    ) : (
-                      <span className="italic text-black">No messages yet</span>
-                    )}
-                </p>
-                <div className="flex mt-1 items-center">
-                    <span className="text-xs text-black mr-2 whitespace-nowrap">
-                      {chat.participants?.filter(p => p.id !== user.id)[0]?.phone || ''}
-                    </span>
-                    {/* Display labels if available */}
-                    {chat.labels && chat.labels.length > 0 && (
-                      <div className="flex flex-wrap gap-1 mr-auto">
-                        {chat.labels.map(label => (
-                          <span 
-                            key={label.id} 
-                            className="text-xs px-2 py-0.5 rounded" 
-                            style={{ 
-                              backgroundColor: label.color ? `${label.color}20` : '#e5e7eb',
-                              color: label.color || '#4b5563'
-                            }}
-                          >
-                            {label.name}
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                    {chat.unread > 0 && (
-                    <span className="ml-auto inline-flex items-center justify-center px-2 py-0.5 text-xs font-medium bg-green-100 text-green-700 rounded-full">
-                      +{chat.unread}
-                    </span>
-                  )}
-                </div>
-              </div>
-            </div>
-            ))
-          )}
+          </button>
+          <button className="w-full flex justify-center py-4 text-gray-400 hover:text-gray-600">
+            <MdDiamond size={18} />
+          </button>
+          <button className="w-full flex justify-center py-4 text-gray-400 hover:text-gray-600">
+            <FaChartLine size={18} />
+          </button>
+          <button className="w-full flex justify-center py-4 text-gray-400 hover:text-gray-600">
+            <FaListAlt size={18} />
+          </button>
+          <button className="w-full flex justify-center py-4 text-gray-400 hover:text-gray-600">
+            <FaBell size={18} />
+          </button>
+          <button className="w-full flex justify-center py-4 text-gray-400 hover:text-gray-600 relative">
+            <FaStar size={18} />
+            <span className="absolute top-3 right-4 text-yellow-400 text-[8px]">★</span>
+          </button>
+          <button className="w-full flex justify-center py-4 text-gray-400 hover:text-gray-600">
+            <FaIdCard size={18} />
+          </button>
+          <button className="w-full flex justify-center py-4 text-gray-400 hover:text-gray-600">
+            <FaImage size={18} />
+          </button>
+          <button className="w-full flex justify-center py-4 text-gray-400 hover:text-gray-600">
+            <FaCode size={18} />
+          </button>
+          <button className="w-full flex justify-center py-4 text-gray-400 hover:text-gray-600">
+            <FaCog size={18} />
+          </button>
+        </div>
+        <div className="mt-auto pt-2">
+          <button className="py-4 text-gray-400 hover:text-gray-600" onClick={logout}>
+            <FaUserAlt size={18} />
+          </button>
         </div>
       </div>
 
-      {/* Chat area */}
       <div className="flex-1 flex flex-col">
-        {/* Chat header */}
-        {selectedChat ? (
-          <>
-            <div className="p-3 border-b flex justify-between items-center bg-white">
+        {/* Main header - spans full width */}
+        <div className="flex items-center justify-between px-4 py-2 bg-white border-b">
+          <div className="flex items-center">
+            <span className="text-gray-600">@</span>
+            <span className="ml-1 text-black">chats</span>
+          </div>
+          <div className="flex items-center space-x-5">
+            <button className="text-gray-600 hover:text-gray-700" title="Refresh">
+              <MdRefresh size={18} />
+            </button>
+            <button className="text-gray-600 hover:text-gray-700" title="Help">
+              <MdHelp size={18} />
+            </button>
+            <div className="flex items-center text-xs">
+              <span className="text-yellow-500 mr-1">●</span>
+              <span className="text-black">5 / 5 phones</span>
+              <span className="ml-1 text-gray-400">⌄</span>
+            </div>
+            <div className="flex items-center space-x-3 ml-4">
+              <button className="text-gray-600 hover:text-gray-700" title="Open in new window">
+                <MdOutlineOpenInNew size={18} />
+              </button>
+              <button className="text-gray-600 hover:text-gray-700" title="Notifications">
+                <FaBell size={16} />
+              </button>
+              <button className="text-gray-600 hover:text-gray-700" title="Menu">
+                <BsThreeDotsVertical size={16} />
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex flex-1 overflow-hidden">
+          {/* Left section (chat list) */}
+          <div className="w-80 border-r flex flex-col bg-white">
+            {/* Filters row */}
+            <div className="px-2 py-2 border-b flex items-center justify-between bg-white h-14">
+              <button className="px-1 py-1 rounded-md text-xs text-green-600 border border-green-600 flex items-center gap-1">
+                <FaFilter size={10} />
+                <span>Custom filter</span>
+              </button>
+              <button className="px-2 py-1 rounded-md text-xs text-gray-600 border border-gray-300 flex items-center gap-1">
+                <FaSave size={10} />
+                <span>Save</span>
+              </button>
               <div className="flex items-center">
-                {loadingMessages ? (
-                  <div className="animate-pulse w-8 h-8 rounded-full bg-gray-200 mr-3"></div>
-                ) : (
-                  <div className="w-8 h-8 rounded-full bg-gray-200 flex items-center justify-center text-gray-600 mr-3">
-                    {(chats.find(c => c.id === selectedChat)?.name || 'U').charAt(0).toUpperCase()}
-                </div>
-                )}
-                <div>
-                  {loadingMessages ? (
-                    <div className="animate-pulse h-4 w-24 bg-gray-200 rounded mb-1"></div>
-                  ) : (
-                    <h2 className="font-medium text-sm">
-                      {chats.find(c => c.id === selectedChat)?.name || 
-                       chats.find(c => c.id === selectedChat)?.participants?.filter(p => p.id !== user.id)[0]?.full_name || 
-                       'Unknown Chat'}
-                    </h2>
-                  )}
-                  {loadingMessages ? (
-                    <div className="animate-pulse h-3 w-32 bg-gray-200 rounded"></div>
-                  ) : (
-                    <p className="text-xs text-black flex items-center">
-                      {chats.find(c => c.id === selectedChat)?.participants?.filter(p => p.id !== user.id)[0]?.phone || ''}
-                    </p>
-                  )}
-                </div>
-              </div>
-              <div className="flex space-x-3">
-                <div className="flex -space-x-2">
-                  {/* Profile pictures of participants */}
-                  {chats.find(c => c.id === selectedChat)?.participants?.slice(0, 3).map((participant, index) => (
-                    <div key={participant.id} className={`w-7 h-7 rounded-full bg-gray-${300 + (index * 50)} border-2 border-white flex items-center justify-center text-xs`}>
-                      {participant.full_name.charAt(0).toUpperCase()}
-                    </div>
-                  ))}
-                  {(chats.find(c => c.id === selectedChat)?.participants?.length || 0) > 3 && (
-                    <div className="w-7 h-7 rounded-full bg-gray-200 border-2 border-white flex items-center justify-center text-xs">
-                      +{(chats.find(c => c.id === selectedChat)?.participants?.length || 0) - 3}
-                    </div>
-                  )}
-                </div>
-                <button className="p-2 rounded-full hover:bg-gray-100 text-black">
-                  <FaPhone size={18} />
+                <button 
+                  className="flex items-center text-xs text-gray-600 mx-1"
+                  onClick={() => setSearchOpen(!searchOpen)}
+                >
+                  <FaSearch size={10} className="mr-1" />
+                  <span>Search</span>
                 </button>
                 <button 
-                  className="p-2 rounded-full hover:bg-gray-100 text-black"
-                  onClick={() => {
-                    // Toggle search visibility
-                    if (isSearchOpen) {
-                      // Close search
-                      setIsSearchOpen(false);
-                      setMessageSearchQuery('');
-                      // Reset to original messages without search
-                      setLoadingMessages(true);
-                      fetch(`/api/messages?chatId=${selectedChat}`)
-                        .then(res => res.json())
-                        .then(data => {
-                          setChatMessages(data.messages || []);
-                          setFilteredMessages(data.messages || []);
-                          setLoadingMessages(false);
-                        })
-                        .catch(err => {
-                          console.error('Error refreshing messages:', err);
-                          setLoadingMessages(false);
-                        });
-                    } else {
-                      // Open search with empty string to start
-                      setIsSearchOpen(true);
-                      setMessageSearchQuery('');
-                    }
-                  }}
+                  className={`flex items-center text-xs mx-1 ${filtered ? 'text-green-600' : 'text-gray-600'}`}
+                  onClick={() => setFiltered(!filtered)}
                 >
-                  <FaSearch size={18} />
-                </button>
-                <button 
-                  className="p-2 rounded-full hover:bg-gray-100 text-black"
-                  onClick={() => setManageLabelsModalOpen(true)}
-                >
-                  <FaTags size={18} />
-                </button>
-                <button className="p-2 rounded-full hover:bg-gray-100 text-black">
-                  <FaEllipsisV size={18} />
+                  <span>Filtered</span>
+                  <FaFilter className={`ml-1 ${filtered ? 'text-green-600' : 'text-gray-600'}`} size={10} />
                 </button>
               </div>
             </div>
 
-            {/* Message search */}
-            <div className={`bg-white p-2 border-b transition-all duration-300 ease-in-out overflow-hidden ${isSearchOpen ? 'max-h-16' : 'max-h-0'}`}>
-              <div className="relative">
-                <input
-                  type="text"
-                  value={messageSearchQuery}
-                  onChange={(e) => setMessageSearchQuery(e.target.value)}
-                  placeholder="Search in conversation..."
-                  className="w-full px-3 py-2 pr-10 border rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-green-500"
-                  autoFocus={isSearchOpen}
-                />
-                <button 
-                  className="absolute right-2 top-2 text-black hover:text-gray-800"
-                  onClick={() => {
-                    setMessageSearchQuery('');
-                    if (messageSearchQuery.trim()) {
-                      // If there was a search query, refetch all messages
-                      setLoadingMessages(true);
-                      fetch(`/api/messages?chatId=${selectedChat}`)
-                        .then(res => res.json())
-                        .then(data => {
-                          setChatMessages(data.messages || []);
-                          setFilteredMessages(data.messages || []);
-                          setLoadingMessages(false);
-                        })
-                        .catch(err => {
-                          console.error('Error refreshing messages:', err);
-                          setLoadingMessages(false);
-                        });
-                    }
-                  }}
-                >
-                  ×
-                </button>
-              </div>
-            </div>
-
-            {/* Chat messages */}
-            <div className="flex-1 p-4 overflow-y-auto bg-gray-50 relative">
-              {/* Refresh messages button */}
-              <div className="absolute top-2 right-2 z-10">
-                <button
-                  onClick={() => {
-                    if (selectedChat) {
-                      // If we're searching, refresh the search results
-                      if (isSearchOpen && messageSearchQuery.trim()) {
-                        const searchUrl = `/api/messages?chatId=${selectedChat}&search=${encodeURIComponent(messageSearchQuery.trim())}`;
-                        setLoadingMessages(true);
-                        fetch(searchUrl)
-                          .then(res => res.json())
-                          .then(data => {
-                            setFilteredMessages(data.messages || []);
-                            setLoadingMessages(false);
-                          })
-                          .catch(err => {
-                            console.error('Error refreshing search results:', err);
-                            setLoadingMessages(false);
-                          });
-                      } else {
-                        // Otherwise refresh all messages
-                        setLoadingMessages(true);
-                        fetch(`/api/messages?chatId=${selectedChat}`)
-                          .then(res => res.json())
-                          .then(data => {
-                            setChatMessages(data.messages || []);
-                            setFilteredMessages(data.messages || []);
-                            setLoadingMessages(false);
-                          })
-                          .catch(err => {
-                            console.error('Error refreshing messages:', err);
-                            setLoadingMessages(false);
-                          });
-                      }
-                    }
-                  }}
-                  className="p-2 rounded-full bg-white text-black hover:text-gray-800 shadow-md"
-                  title={isSearchOpen && messageSearchQuery.trim() ? "Refresh search results" : "Refresh messages"}
-                >
-                  <FaSync className={loadingMessages ? "animate-spin" : ""} />
-                </button>
-              </div>
-
-              {loadingMessages ? (
-                <div className="flex justify-center items-center h-full">
-                  <div className="animate-pulse text-black">Loading messages...</div>
+            {/* Search bar (conditionally rendered) */}
+            {searchOpen && (
+              <div className="px-3 py-2 border-b">
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    placeholder="Search chats..."
+                    className="w-full px-3 py-1.5 pr-8 border rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-green-500 text-gray-500"
+                  />
+                  {searchQuery && (
+                    <button 
+                      className="absolute right-2 top-2 text-black hover:text-gray-800"
+                      onClick={() => setSearchQuery('')}
+                    >
+                      ×
+                    </button>
+                  )}
                 </div>
-              ) : chatMessages.length === 0 ? (
-                <div className="flex justify-center items-center h-full">
-                  <div className="text-black">No messages yet</div>
+              </div>
+            )}
+
+            {/* Chat list with New Chat Button */}
+            <div className="flex-1 overflow-y-auto relative">
+              {loadingChats ? (
+                <div className="flex justify-center items-center h-32">
+                  <div className="animate-pulse text-black">Loading chats...</div>
+                </div>
+              ) : filteredChats.length === 0 ? (
+                <div className="flex justify-center items-center h-32">
+                  <div className="text-black">
+                    {searchQuery ? 'No matching chats found' : 'No chats found'}
                   </div>
-              ) : filteredMessages.length === 0 && isSearchOpen ? (
-                <div className="flex justify-center items-center h-full">
-                  <div className="text-black">No messages match your search</div>
                 </div>
               ) : (
-                Object.entries(groupMessagesByDate()).map(([date, messages]) => (
-                  <div key={date}>
-              {/* Date marker */}
-                    <div className="flex justify-center mb-4">
-                <span className="px-3 py-1 bg-gray-200 rounded-full text-xs text-gray-600">
-                        {date}
+                filteredChats.map((chat) => (
+                <div 
+                  key={chat.id}
+                  className={`flex p-3 border-b cursor-pointer hover:bg-gray-50 ${selectedChat === chat.id ? 'bg-gray-100' : ''}`}
+                  onClick={() => handleChatSelect(chat)}
+                >
+                    <div className="w-10 h-10 rounded-full bg-gray-200 flex-shrink-0 flex items-center justify-center text-gray-600 relative mr-3">
+                      {chat.is_group ? (
+                        <div className="bg-green-100 w-full h-full rounded-full flex items-center justify-center">
+                          <FaUsers className="text-green-600" />
+                        </div>
+                      ) : (
+                        chat.participants?.[0]?.profile_image_url ? (
+                          <img 
+                            src={chat.participants[0].profile_image_url} 
+                            alt={chat.participants[0].full_name}
+                            className="w-full h-full rounded-full object-cover" 
+                          />
+                        ) : (
+                          chat.participants?.[0]?.full_name.charAt(0).toUpperCase()
+                        )
+                      )}
+                      {/* Unread indicator */}
+                      {chat.unread > 0 && (
+                        <div className="absolute -top-1 -right-1 bg-green-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center">
+                          {chat.unread}
+                        </div>
+                      )}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h3 className="font-medium text-sm truncate text-gray-700">
+                          {chat.is_group ? (
+                            <span>{chat.name || 'Group Chat'}</span>
+                          ) : (
+                            <span>{chat.participants?.[0]?.full_name || 'Chat'}</span>
+                          )}
+                        </h3>
+                      </div>
+                      
+                      <div className="flex items-center">
+                        {/* Display labels on the right end */}
+                        {chat.labels && chat.labels.length > 0 ? (
+                          <div className="flex flex-wrap">
+                            {/* Show first label only */}
+                            <span 
+                              key={chat.labels[0].id} 
+                              className="text-xs px-1.5 py-0 rounded mr-2" 
+                              style={{ 
+                                backgroundColor: chat.labels[0].color ? `${chat.labels[0].color}10` : '#e5e7eb',
+                                color: chat.labels[0].color || '#4b5563'
+                              }}
+                            >
+                              {chat.labels[0].name}
+                            </span>
+                            
+                            {/* Show +X indicator if more than 1 label */}
+                            {chat.labels.length > 1 && (
+                              <span className="text-xs px-1.5 py-0 rounded mr-2 bg-gray-100 text-gray-500">
+                                +{chat.labels.length - 1}
+                              </span>
+                            )}
+                          </div>
+                        ) : (
+                          <>
+                            <span className="text-xs px-1.5 py-0 rounded bg-gray-100 text-gray-500 mr-2">
+                              Demo
+                            </span>
+                            {chat.is_group && (
+                              <span className="text-xs px-1.5 py-0 rounded bg-green-50 text-green-600 mr-2">
+                                Internal
+                              </span>
+                            )}
+                          </>
+                        )}
+                      </div>
+                    </div>
+                    
+                    <p className="text-xs text-gray-800 truncate mt-1">
+                      {chat.lastMessage ? (
+                        <>
+                          {chat.lastMessage.sender_id !== user.id && (
+                            <span className="font-medium">{chat.lastMessage.sender_name}: </span>
+                          )}
+                          {chat.lastMessage.content}
+                        </>
+                      ) : (
+                        <span className="italic text-gray-500">No messages yet</span>
+                      )}
+                    </p>
+                    
+                    <div className="flex justify-between mt-1 items-center">
+                      <span className="text-xs text-gray-500 whitespace-nowrap">
+                        {chat.participants?.filter(p => p.id !== user.id)[0]?.phone || ''}
+                      </span>
+                      <span className="text-xs text-gray-400 whitespace-nowrap">
+                        {(chat.updated_at || chat.lastMessage?.created_at) ? 
+                          formatDate(chat.updated_at || chat.lastMessage?.created_at || '') : 
+                          ''}
                       </span>
                     </div>
+                  </div>
+                </div>
+                ))
+              )}
+              
+              {/* Floating new chat button */}
+              <div className="absolute bottom-6 right-6 z-20">
+                <button
+                  onClick={() => setNewChatModalOpen(true)}
+                  className="w-14 h-14 rounded-full bg-green-600 text-white flex items-center justify-center shadow-lg hover:bg-green-700 transition-colors focus:outline-none"
+                >
+                  <span className="text-2xl">+</span>
+                </button>
+              </div>
+            </div>
+          </div>
 
-                    {/* Messages for this date */}
-                    {messages.map((msg, index) => (
-                      <div 
-                        key={msg.id} 
-                        className={`mb-3 ${msg.isSent ? 'flex justify-end' : 'flex items-start'}`}
-                        data-message-id={msg.id}
-                        ref={el => {
-                          // Only track non-sent, unread messages for visibility
-                          if (!msg.isSent && !msg.isRead && !msg.id.toString().startsWith('temp-')) {
-                            unreadMessageRefs.current[msg.id] = el;
-                          } else {
-                            // Clean up references that are no longer needed
-                            if (unreadMessageRefs.current[msg.id]) {
-                              delete unreadMessageRefs.current[msg.id];
-                            }
+          {/* Right section (chat area) */}
+          <div className="flex-1 flex flex-col">
+            {/* Chat header */}
+            {selectedChat ? (
+              <>
+                <div className="p-3 border-b flex justify-between items-center bg-white">
+                  <div className="flex items-center">
+                    {loadingMessages ? (
+                      <div className="animate-pulse w-8 h-8 rounded-full bg-gray-200 mr-3"></div>
+                    ) : (
+                      <div className="w-8 h-8 rounded-full bg-gray-200 flex items-center justify-center text-gray-600 mr-3">
+                        {(chats.find(c => c.id === selectedChat)?.name || 'U').charAt(0).toUpperCase()}
+                      </div>
+                    )}
+                    <div>
+                      {loadingMessages ? (
+                        <div className="animate-pulse h-4 w-24 bg-gray-200 rounded mb-1"></div>
+                      ) : (
+                        <h2 className="font-medium text-sm text-gray-700">
+                          {chats.find(c => c.id === selectedChat)?.name || 
+                           chats.find(c => c.id === selectedChat)?.participants?.filter(p => p.id !== user.id)[0]?.full_name || 
+                           'Unknown Chat'}
+                        </h2>
+                      )}
+                      {loadingMessages ? (
+                        <div className="animate-pulse h-3 w-32 bg-gray-200 rounded"></div>
+                      ) : (
+                        <p className="text-xs text-gray-500 flex items-center">
+                          {chats.find(c => c.id === selectedChat)?.participants?.filter(p => p.id !== user.id)[0]?.phone || ''}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex space-x-3">
+                    <div className="flex -space-x-2">
+                      {/* Profile pictures of participants */}
+                      {chats.find(c => c.id === selectedChat)?.participants?.slice(0, 3).map((participant, index) => (
+                        <div key={participant.id} className={`w-7 h-7 rounded-full bg-gray-${300 + (index * 50)} border-2 border-white flex items-center justify-center text-xs`}>
+                          {participant.full_name.charAt(0).toUpperCase()}
+                        </div>
+                      ))}
+                      {(chats.find(c => c.id === selectedChat)?.participants?.length || 0) > 3 && (
+                        <div className="w-7 h-7 rounded-full bg-gray-200 border-2 border-white flex items-center justify-center text-xs">
+                          +{(chats.find(c => c.id === selectedChat)?.participants?.length || 0) - 3}
+                        </div>
+                      )}
+                    </div>
+                    <button className="p-2 rounded-full hover:bg-gray-100 text-gray-700">
+                      <FaPhone size={16} />
+                    </button>
+                    <button 
+                      className="p-2 rounded-full hover:bg-gray-100 text-gray-700"
+                      onClick={() => {
+                        if (isSearchOpen) {
+                          setIsSearchOpen(false);
+                          setMessageSearchQuery('');
+                          setLoadingMessages(true);
+                          fetch(`/api/messages?chatId=${selectedChat}`)
+                            .then(res => res.json())
+                            .then(data => {
+                              setChatMessages(data.messages || []);
+                              setFilteredMessages(data.messages || []);
+                              setLoadingMessages(false);
+                            })
+                            .catch(err => {
+                              console.error('Error refreshing messages:', err);
+                              setLoadingMessages(false);
+                            });
+                        } else {
+                          setIsSearchOpen(true);
+                          setMessageSearchQuery('');
+                        }
+                      }}
+                    >
+                      <FaSearch size={16} />
+                    </button>
+                    <button 
+                      className="p-2 rounded-full hover:bg-gray-100 text-gray-700"
+                      onClick={() => setManageLabelsModalOpen(true)}
+                    >
+                      <FaTags size={16} />
+                    </button>
+                    <button className="p-2 rounded-full hover:bg-gray-100 text-gray-700">
+                      <FaEllipsisV size={16} />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Message search */}
+                {isSearchOpen && (
+                  <div className="bg-white p-2 border-b">
+                    <div className="relative">
+                      <input
+                        type="text"
+                        value={messageSearchQuery}
+                        onChange={(e) => setMessageSearchQuery(e.target.value)}
+                        placeholder="Search in conversation..."
+                        className="w-full px-3 py-2 pr-10 border rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-green-500 text-gray-500"
+                        autoFocus
+                      />
+                      <button 
+                        className="absolute right-2 top-2 text-black hover:text-gray-800"
+                        onClick={() => {
+                          setMessageSearchQuery('');
+                          if (messageSearchQuery.trim()) {
+                            setLoadingMessages(true);
+                            fetch(`/api/messages?chatId=${selectedChat}`)
+                              .then(res => res.json())
+                              .then(data => {
+                                setChatMessages(data.messages || []);
+                                setFilteredMessages(data.messages || []);
+                                setLoadingMessages(false);
+                              })
+                              .catch(err => {
+                                console.error('Error refreshing messages:', err);
+                                setLoadingMessages(false);
+                              });
                           }
                         }}
                       >
-                        {!msg.isSent && (
-                          <div className="flex-shrink-0 w-8 h-8 rounded-full bg-gray-300 flex items-center justify-center text-gray-600 mr-2">
-                            {msg.sender.charAt(0).toUpperCase()}
-                  </div>
-                        )}
-                        <div className={`max-w-md ${msg.isSent ? '' : 'ml-2'}`}>
-                          {/* Show sender info for incoming messages or for the first message in a sequence */}
-                          {(!msg.isSent || (index > 0 && messages[index - 1].isSent !== msg.isSent)) && (
-                            <div className={`text-xs text-black mb-1 ${msg.isSent ? 'flex justify-end' : ''}`}>
-                              {msg.sender} {msg.phoneNumber && <span className="text-black ml-1">{msg.phoneNumber}</span>}
-                </div>
-                          )}
-                          <div className={`${msg.isSent ? 'bg-green-50' : 'bg-white'} p-3 rounded-lg`}>
-                            <p className="text-gray-800">{msg.text}</p>
-                            <div className={`${msg.isSent ? 'flex justify-between' : ''} items-center mt-1`}>
-                              {msg.email && msg.isSent && (
-                                <span className="text-xs text-black">{msg.email}</span>
-                              )}
-                              <div className={`flex items-center ${!msg.isSent ? 'justify-end' : ''}`}>
-                                <span className="text-xs text-black mr-1">{msg.time}</span>
-                                {msg.isSent && (
-                                  <span className="text-green-500 flex items-center">
-                                    {msg.id.toString().startsWith('temp-') ? (
-                                      <span className="text-xs text-black italic">sending...</span>
-                                    ) : (
-                                      <>
-                                        <FaCheck className="inline" />
-                                        {msg.isRead && <FaCheck className="inline -ml-1" />}
-                                      </>
-                                    )}
-                                  </span>
-                                )}
-                      </div>
+                        ×
+                      </button>
                     </div>
                   </div>
+                )}
+
+                {/* Chat messages */}
+                <div className="flex-1 p-4 overflow-y-auto relative" style={{ 
+                  backgroundImage: 'url("/background.jpg")', 
+                  backgroundSize: 'cover', 
+                  backgroundRepeat: 'no-repeat',
+                  backgroundColor: 'rgba(255, 255, 255, 0.6)',
+                  backgroundBlendMode: 'lighten'
+                }}>
+                  {/* Refresh messages button */}
+                  <div className="absolute top-2 right-2 z-10">
+                    <button
+                      onClick={() => {
+                        if (selectedChat) {
+                          if (isSearchOpen && messageSearchQuery.trim()) {
+                            const searchUrl = `/api/messages?chatId=${selectedChat}&search=${encodeURIComponent(messageSearchQuery.trim())}`;
+                            setLoadingMessages(true);
+                            fetch(searchUrl)
+                              .then(res => res.json())
+                              .then(data => {
+                                setFilteredMessages(data.messages || []);
+                                setLoadingMessages(false);
+                              })
+                              .catch(err => {
+                                console.error('Error refreshing search results:', err);
+                                setLoadingMessages(false);
+                              });
+                          } else {
+                            setLoadingMessages(true);
+                            fetch(`/api/messages?chatId=${selectedChat}`)
+                              .then(res => res.json())
+                              .then(data => {
+                                setChatMessages(data.messages || []);
+                                setFilteredMessages(data.messages || []);
+                                setLoadingMessages(false);
+                              })
+                              .catch(err => {
+                                console.error('Error refreshing messages:', err);
+                                setLoadingMessages(false);
+                              });
+                          }
+                        }
+                      }}
+                      className="p-2 rounded-full bg-white text-gray-700 hover:text-gray-800 shadow-md"
+                      title={isSearchOpen && messageSearchQuery.trim() ? "Refresh search results" : "Refresh messages"}
+                    >
+                      <FaSync className={loadingMessages ? "animate-spin" : ""} size={14} />
+                    </button>
+                  </div>
+
+                  {loadingMessages ? (
+                    <div className="flex justify-center items-center h-full">
+                      <div className="animate-pulse text-gray-700">Loading messages...</div>
+                    </div>
+                  ) : chatMessages.length === 0 ? (
+                    <div className="flex justify-center items-center h-full">
+                      <div className="text-gray-700">No messages yet</div>
+                    </div>
+                  ) : filteredMessages.length === 0 && isSearchOpen ? (
+                    <div className="flex justify-center items-center h-full">
+                      <div className="text-gray-700">No messages match your search</div>
+                    </div>
+                  ) : (
+                    Object.entries(messageGroups).map(([date, messages]) => (
+                      <div key={date}>
+                        {/* Date marker */}
+                        <div className="flex justify-center mb-4">
+                          <span className="px-3 py-1 bg-gray-200 rounded-full text-xs text-gray-600">
+                            {date}
+                          </span>
+                        </div>
+
+                        {/* Messages for this date */}
+                        {messages.map((msg, index) => (
+                          <div 
+                            key={msg.id} 
+                            className={`mb-3 ${msg.isSent ? 'flex justify-end' : 'flex items-start'}`}
+                            data-message-id={msg.id}
+                            ref={el => {
+                              if (!msg.isSent && !msg.isRead && !msg.id.toString().startsWith('temp-')) {
+                                unreadMessageRefs.current[msg.id] = el;
+                              } else {
+                                if (unreadMessageRefs.current[msg.id]) {
+                                  delete unreadMessageRefs.current[msg.id];
+                                }
+                              }
+                            }}
+                          >
+                            {!msg.isSent && (
+                              <div className="flex-shrink-0 w-8 h-8 rounded-full bg-gray-200 flex items-center justify-center text-gray-600 mr-2">
+                                {msg.sender.charAt(0).toUpperCase()}
+                              </div>
+                            )}
+                            <div className={`max-w-md ${msg.isSent ? '' : 'ml-2'}`}>
+                              {(!msg.isSent || (index > 0 && messages[index - 1].isSent !== msg.isSent)) && (
+                                <div className={`text-xs text-gray-600 mb-1 ${msg.isSent ? 'text-right' : ''}`}>
+                                  {msg.sender} {msg.phoneNumber && <span className="text-gray-500 ml-1">{msg.phoneNumber}</span>}
+                                </div>
+                              )}
+                              <div className={`rounded-lg shadow-sm ${msg.isSent ? 'bg-green-50 text-right' : 'bg-white'}`}>
+                                <div className="p-3">
+                                  <p className="text-gray-800">{msg.text}</p>
+                                  <div className={`flex items-center mt-1 ${msg.isSent ? 'justify-end' : ''}`}>
+                                    <div className="flex items-center">
+                                      <span className="text-xs text-gray-500">{msg.time}</span>
+                                      {msg.isSent && (
+                                        <span className="text-green-500 ml-1 flex items-center">
+                                          {msg.id.toString().startsWith('temp-') ? (
+                                            <span className="text-xs text-gray-500 italic">sending...</span>
+                                          ) : (
+                                            <>
+                                              <FaCheck className="inline" size={10} />
+                                              {msg.isRead && <FaCheck className="inline -ml-0.5" size={10} />}
+                                            </>
+                                          )}
+                                        </span>
+                                      )}
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ))
+                  )}
+                  <div ref={messagesEndRef} />
+                </div>
+
+                {/* Message input */}
+                <div className="px-3 py-2 border-t bg-white flex items-center">
+                  <button className="p-2 text-gray-500 hover:text-gray-700">
+                    <FaSmile size={20} />
+                  </button>
+                  <button className="p-2 text-gray-500 hover:text-gray-700">
+                    <FaPaperclip size={20} />
+                  </button>
+                  <input
+                    type="text"
+                    className="flex-1 border-0 bg-gray-100 rounded-full px-4 py-2 mx-2 focus:outline-none focus:ring-1 focus:ring-green-500 text-gray-700"
+                    placeholder="Message..."
+                    value={message}
+                    onChange={(e) => setMessage(e.target.value)}
+                    onKeyPress={handleKeyPress}
+                  />
+                  <button className="p-2 text-gray-500 hover:text-gray-700">
+                    <FaMicrophone size={20} />
+                  </button>
+                  <button 
+                    className="w-8 h-8 bg-green-600 rounded-full flex items-center justify-center text-white hover:bg-green-700"
+                    onClick={sendMessage}
+                    disabled={!message.trim()}
+                  >
+                    <FaPaperPlane className="text-sm" />
+                  </button>
+                </div>
+              </>
+            ) : (
+              <div className="flex-1 flex items-center justify-center" style={{ 
+                backgroundImage: 'url("/background.jpg")', 
+                backgroundSize: 'cover', 
+                backgroundRepeat: 'no-repeat',
+                backgroundColor: 'rgba(255, 255, 255, 0.6)',
+                backgroundBlendMode: 'lighten'
+              }}>
+                <div className="text-center">
+                  <h2 className="text-xl font-medium text-gray-500 mb-2">Select a chat to start messaging</h2>
+                  <p className="text-gray-400">Choose from your existing conversations</p>
                 </div>
               </div>
-                    ))}
-                  </div>
-                ))
-              )}
-              <div ref={messagesEndRef} />
-            </div>
-
-            {/* Message input */}
-            <div className="px-3 py-2 border-t bg-white flex items-center">
-              <button className="p-2 text-black hover:text-gray-800">
-                <FaSmile className="text-xl" />
-              </button>
-              <button className="p-2 text-black hover:text-gray-800">
-                <FaPaperclip className="text-xl" />
-              </button>
-              <input
-                type="text"
-                className="flex-1 border-0 bg-gray-100 rounded-full px-4 py-2 mx-2 focus:outline-none focus:ring-1 focus:ring-green-500 text-black"
-                placeholder="Message..."
-                value={message}
-                onChange={(e) => setMessage(e.target.value)}
-                onKeyPress={handleKeyPress}
-              />
-              <button className="p-2 text-black hover:text-gray-800">
-                <FaMicrophone className="text-xl" />
-              </button>
-              <button 
-                className="w-8 h-8 bg-green-600 rounded-full flex items-center justify-center text-white hover:bg-green-700"
-                onClick={sendMessage}
-                disabled={!message.trim()}
-              >
-                <FaPaperPlane className="text-sm" />
-              </button>
-            </div>
-          </>
-        ) : (
-          <div className="flex-1 flex items-center justify-center bg-gray-50">
-            <div className="text-center">
-              <h2 className="text-xl font-medium text-gray-500 mb-2">Select a chat to start messaging</h2>
-              <p className="text-gray-400">Choose from your existing conversations</p>
-            </div>
+            )}
           </div>
-        )}
+        </div>
       </div>
 
       {/* Manage Labels Modal */}
@@ -1260,7 +1425,7 @@ export default function ChatsPage() {
           onClose={() => setManageLabelsModalOpen(false)}
           chatId={selectedChat}
           chatName={chats.find(c => c.id === selectedChat)?.name || 'Unknown Chat'}
-          onLabelApplied={() => {}}
+          onLabelApplied={handleLabelsApplied}
         />
       )}
     </div>

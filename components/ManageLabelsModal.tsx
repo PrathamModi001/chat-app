@@ -261,10 +261,10 @@ export default function ManageLabelsModal({
           <div className="flex items-center">
             <input
               type="text"
+              placeholder="Label name"
+              className="flex-1 border rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-green-500 text-gray-500"
               value={newLabelName}
               onChange={(e) => setNewLabelName(e.target.value)}
-              placeholder="Label name"
-              className="flex-1 border border-gray-300 rounded-md p-2 text-black focus:outline-none focus:ring-1 focus:ring-green-500"
               onKeyPress={(e) => {
                 if (e.key === 'Enter' && newLabelName.trim()) {
                   createAndApplyLabel();

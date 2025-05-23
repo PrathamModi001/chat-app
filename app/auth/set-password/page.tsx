@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, Suspense } from 'react';
-import { FaLock } from 'react-icons/fa';
+import { FaArrowLeft } from 'react-icons/fa';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { useAuth } from '@/lib/context/AuthContext';
@@ -88,14 +88,19 @@ function SetPasswordForm() {
 
   if (validatingToken) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-gray-50 p-4 dark:bg-gray-900">
-        <div className="w-full max-w-md">
-          <div className="mb-6 text-center">
-            <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Periskope</h1>
-            <p className="mt-2 text-gray-600 dark:text-gray-400">Validating your request...</p>
-          </div>
-          <div className="flex justify-center">
-            <div className="animate-spin h-8 w-8 border-4 border-blue-500 rounded-full border-t-transparent"></div>
+      <div className="flex min-h-screen bg-[#14213b] justify-center items-center">
+        <div className="w-full max-w-md mx-auto">
+          <div className="bg-white rounded-lg p-8 shadow-lg">
+            <div className="flex justify-center mb-6">
+              <div className="w-12 h-12 rounded-full bg-green-600 text-white flex items-center justify-center text-xl font-bold">
+                P
+              </div>
+            </div>
+            <h1 className="text-2xl font-bold text-center mb-6">Periskope</h1>
+            <div className="flex justify-center">
+              <div className="animate-spin h-8 w-8 border-4 border-green-500 rounded-full border-t-transparent"></div>
+            </div>
+            <p className="mt-4 text-center text-gray-600">Validating your request...</p>
           </div>
         </div>
       </div>
@@ -103,100 +108,101 @@ function SetPasswordForm() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gray-50 p-4 dark:bg-gray-900">
-      <div className="w-full max-w-md">
-        <div className="mb-6 text-center">
-          <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Periskope</h1>
-          <p className="mt-2 text-gray-600 dark:text-gray-400">Set your password</p>
-        </div>
-        
-        <div className="rounded-lg bg-white p-6 shadow-md dark:bg-gray-800">
+    <div className="flex min-h-screen bg-[#14213b] justify-center items-center">
+      <div className="w-full max-w-md mx-auto">
+        <div className="bg-white rounded-lg p-8 shadow-lg">
+          <Link href="/" className="flex items-center text-gray-700 mb-6 hover:text-gray-900">
+            <FaArrowLeft className="mr-2" />
+            <span>Back to home</span>
+          </Link>
+          
+          <div className="flex justify-center mb-6">
+            <div className="w-12 h-12 rounded-full bg-green-600 text-white flex items-center justify-center text-xl font-bold">
+              P
+            </div>
+          </div>
+          
+          <h2 className="text-2xl font-bold text-center mb-2">Set Your Password</h2>
+          <p className="text-gray-600 text-center mb-8">Create a secure password for your account</p>
+          
           {error && (
-            <div className="mb-4 rounded bg-red-100 p-3 text-red-700 dark:bg-red-900 dark:text-red-100">
+            <div className="mb-6 rounded-md bg-red-50 p-4 text-red-600 text-center">
               {error}
             </div>
           )}
           
           {success ? (
             <div className="text-center">
-              <div className="mb-4 rounded bg-green-100 p-3 text-green-700 dark:bg-green-900 dark:text-green-100">
+              <div className="mb-6 rounded-md bg-green-50 p-4 text-green-600">
                 Password set successfully! Redirecting to login...
               </div>
             </div>
           ) : !tokenValid ? (
             <div className="text-center">
-              <div className="mb-4 rounded bg-red-100 p-3 text-red-700 dark:bg-red-900 dark:text-red-100">
+              <div className="mb-6 rounded-md bg-red-50 p-4 text-red-600">
                 Invalid or expired token. Please request a new password reset.
               </div>
-              <Link href="/signup" className="font-medium text-blue-600 hover:underline dark:text-blue-500">
+              <Link href="/signup" className="text-center block text-green-600 font-medium hover:text-green-700">
                 Back to signup
               </Link>
             </div>
           ) : (
-            <form onSubmit={handleSubmit}>
-              {email && (
-                <div className="mb-4 text-center text-sm text-gray-600 dark:text-gray-400">
-                  Setting password for: <span className="font-medium">{email}</span>
-                </div>
-              )}
-              
-              <div className="mb-4">
-                <label htmlFor="password" className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                  Password
-                </label>
-                <div className="relative">
-                  <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
-                    <FaLock className="text-gray-400" />
+            <>
+              <form onSubmit={handleSubmit}>
+                {email && (
+                  <div className="mb-6 text-center text-gray-600">
+                    Setting password for: <span className="font-medium">{email}</span>
                   </div>
+                )}
+                
+                <div className="mb-4">
+                  <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-1">
+                    Password
+                  </label>
                   <input
                     id="password"
                     type="password"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    className="block w-full rounded-md border border-gray-300 bg-gray-50 p-2.5 pl-10 text-gray-900 focus:border-blue-500 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white dark:placeholder-gray-400 dark:focus:border-blue-500 dark:focus:ring-blue-500"
-                    placeholder="Create password"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent text-gray-500"
+                    placeholder="Create a password"
                     required
                     minLength={8}
                   />
                 </div>
-              </div>
-              
-              <div className="mb-6">
-                <label htmlFor="confirmPassword" className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                  Confirm Password
-                </label>
-                <div className="relative">
-                  <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
-                    <FaLock className="text-gray-400" />
-                  </div>
+                
+                <div className="mb-6">
+                  <label htmlFor="confirmPassword" className="block text-sm font-medium text-gray-700 mb-1">
+                    Confirm Password
+                  </label>
                   <input
                     id="confirmPassword"
                     type="password"
                     value={confirmPassword}
                     onChange={(e) => setConfirmPassword(e.target.value)}
-                    className="block w-full rounded-md border border-gray-300 bg-gray-50 p-2.5 pl-10 text-gray-900 focus:border-blue-500 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white dark:placeholder-gray-400 dark:focus:border-blue-500 dark:focus:ring-blue-500"
-                    placeholder="Confirm password"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent text-gray-500"
+                    placeholder="Confirm your password"
                     required
                     minLength={8}
                   />
                 </div>
-              </div>
+                
+                <button
+                  type="submit"
+                  disabled={loading || !email}
+                  className="w-full py-3 bg-green-600 text-white font-medium rounded-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 disabled:opacity-50"
+                >
+                  {loading ? 'Setting password...' : 'Set Password'}
+                </button>
+              </form>
               
-              <button
-                type="submit"
-                disabled={loading || !email}
-                className="w-full rounded-md bg-blue-500 px-4 py-2 text-center text-white hover:bg-blue-600 focus:outline-none focus:ring-4 focus:ring-blue-300 disabled:opacity-50 dark:bg-blue-600 dark:hover:bg-blue-700 dark:focus:ring-blue-800"
-              >
-                {loading ? 'Setting password...' : 'Set Password'}
-              </button>
-            </form>
+              <div className="mt-6 text-center">
+                <Link href="/login" className="text-green-600 font-medium hover:text-green-700">
+                  Back to login
+                </Link>
+              </div>
+            </>
           )}
-          
-          <div className="mt-4 text-center text-sm text-gray-600 dark:text-gray-400">
-            <Link href="/login" className="font-medium text-blue-600 hover:underline dark:text-blue-500">
-              Back to login
-            </Link>
-          </div>
         </div>
       </div>
     </div>
@@ -206,7 +212,23 @@ function SetPasswordForm() {
 // This is the page component that wraps SetPasswordForm with Suspense
 export default function SetPasswordPage() {
   return (
-    <Suspense fallback={<div>Loading page...</div>}> 
+    <Suspense fallback={
+      <div className="flex min-h-screen bg-[#14213b] justify-center items-center">
+        <div className="w-full max-w-md mx-auto">
+          <div className="bg-white rounded-lg p-8 shadow-lg">
+            <div className="flex justify-center mb-6">
+              <div className="w-12 h-12 rounded-full bg-green-600 text-white flex items-center justify-center text-xl font-bold">
+                P
+              </div>
+            </div>
+            <h1 className="text-2xl font-bold text-center mb-6">Periskope</h1>
+            <div className="flex justify-center">
+              <div className="animate-spin h-8 w-8 border-4 border-green-500 rounded-full border-t-transparent"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    }> 
       <SetPasswordForm />
     </Suspense>
   );
